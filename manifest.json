@@ -6,10 +6,10 @@
     "en": "Game servers"
   },
   "description": {
-    "de": "Valheim, Palworld, Rust, Terraria, Satisfactory und über 100 weitere Spiele über LinuxGSM – nativ auf Linux, unter Windows als Docker-Container. Mit Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Überwachung und Portfreigabe.",
-    "en": "Valheim, Palworld, Rust, Terraria, Satisfactory and more than 100 other games through LinuxGSM – natively on Linux, as Docker containers on Windows. With console, player list, map and version through the Steam query, updates, backups, monitoring and port forwarding."
+    "de": "Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Einrichtung in einem Schritt (Docker kommt bei Bedarf mit), Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Zeitplan, Ressourcen-Grenzen, Überwachung und Portfreigabe.",
+    "en": "Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. One-step setup (Docker comes along when needed), console, player list, map and version through the Steam query, updates, backups, schedule, resource limits, monitoring and port forwarding."
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-game-servers",
   "license": "MIT",
@@ -17,7 +17,7 @@
   "banner": "banner.svg",
   "color": "#ea580c",
   "category": "games",
-  "hostwerk": ">=2.9.0",
+  "hostwerk": ">=2.11.0",
   "permissions": [
     "native"
   ],
@@ -27,8 +27,8 @@
       "en": "Game servers"
     },
     "description": {
-      "de": "Über 100 Spiele aus LinuxGSM.",
-      "en": "More than 100 games from LinuxGSM."
+      "de": "Steam-Server-Tools über SteamCMD und über 100 Spiele aus LinuxGSM.",
+      "en": "Steam server tools through SteamCMD and more than 100 games from LinuxGSM."
     },
     "icon": "gamepad"
   },

@@ -2,7 +2,7 @@
 
 # Game servers
 
-Valheim, Palworld, Rust, Terraria, Satisfactory and more than 100 other games through LinuxGSM – natively on Linux, as Docker containers on Windows.
+Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. Natively where possible, in Docker containers where not.
 
 [Deutsch](README.de.md) · An official [Hostwerk](https://github.com/Passimoritz/hostwerk-public) extension (SDK 2.7, native extension)
 
@@ -10,12 +10,16 @@ Valheim, Palworld, Rust, Terraria, Satisfactory and more than 100 other games th
 
 ## What it does
 
-- Every game from LinuxGSM’s list, picked with logos
+- **One-step setup:** pick a game → Docker (only if needed, set up for you) → install → start, as one job with numbered steps
+- **Two ways:** Steam server tools through SteamCMD (natively on Windows and Linux, Linux-only tools in Docker) and every game from LinuxGSM’s list
+- Steam list stays small: ready-made start lines for popular games built in; the complete list of Steam server tools only on request, read once as a stream, filtered, gzipped, reused for 7 days, searched page by page
 - Console, send commands, player list, map and version through the Steam query (A2S)
 - Every LinuxGSM command – including the game-specific ones the script offers (e.g. wipe for Rust)
 - Updates (automatic when nobody plays), backups, monitor with restart after a crash
 - Ports and addresses, forwarding through the “Router & port forwarding” extension
 - Start with Hostwerk, settings editor (lgsm config) and file browser
+- Settings per server: name, ports, max players, password, start line, config files, update on start, restart after a crash, CPU/RAM limits for containers, scheduled restarts/backups (through Hostwerk’s tasks)
+- Console input for Steam servers through RCON (CS2, Garry’s Mod, TF2, Rust, ARK …)
 
 ## Install
 
@@ -25,7 +29,7 @@ Native extensions run as part of Hostwerk (own server and interface part). That 
 
 ## Data
 
-`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>` – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
+`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>`, SteamCMD and the cached Steam list in `<Hostwerk>/data/game-servers` – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
 
 ## Develop
 

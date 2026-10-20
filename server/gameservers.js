@@ -8,11 +8,18 @@
  *  - Docker everywhere else: the official LinuxGSM image, one container per server, data in a volume.
  * The game list comes from LinuxGSM's serverlist.csv (refreshed daily, with a bundled fallback).
  * Data stays where it always was: settings.games and <base>/spiele.
+ *
+ * Second method (1.3): Steam server tools through SteamCMD (server/steam.js) – kind "steam" in the same list, same
+ * commands (start, stop, restart, update, validate, backup), same tabs. One-step setup: game → Docker (if needed) →
+ * install → start as one job (setup()).
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { SteamServers, planFor, safeRel, hostPlatform } = require('./steam');
+const { SteamAppList } = require('./steamlist');
+const SG = require('./steamgames');
 
 // Hostwerk's building blocks – bound in the constructor (see server/index.js)
 let H = null;
@@ -54,12 +61,69 @@ const FAVORITES = { vhserver: 'Valheim', tsserver: 'Terraria (tShock)', pwserver
 /** "Docker missing" error with a code: the interface then asks "Install Docker too?" (accept/cancel) and tries again. */
 function dockerMissing(name) { return Object.assign(new Error(name ? T('“{name}” needs Docker – it is not set up on this PC yet.', { name }) : T('This needs Docker – it is not set up on this PC yet.')), { status: 428, code: 'DOCKER_MISSING' }); }
 
+/*
+ * Popular games for the one-step setup: each one is offered with the method that works best on this system –
+ * Windows: the Steam server tool natively when it exists for Windows (no Docker needed), else LinuxGSM in Docker;
+ * Linux: LinuxGSM natively (tried and tested), else the Steam server tool.
+ */
+const PICKS = [
+  ['Valheim', 896660, 'vhserver'], ['Palworld', 2394010, 'pwserver'], ['Satisfactory', 1690800, 'sfserver'], ['Rust', 258550, 'rustserver'],
+  ['7 Days to Die', 294420, 'sdtdserver'], ['Project Zomboid', 380870, 'pzserver'], ['Counter-Strike 2', 730, 'cs2server'], ['Enshrouded', 2278520, null],
+  ['V Rising', 1829350, null], ['ARK: Survival Ascended', 2430930, null], ['Terraria (tShock)', null, 'tsserver'], ["Garry's Mod", 4020, 'gmodserver'],
+  ['Conan Exiles', 443030, null], ['Unturned', 1110390, 'unturnedserver'], ['Space Engineers', 298740, null], ['Team Fortress 2', 232250, 'tf2server'],
+];
+function pickFor([name, appid, script], platform) {
+  const p = appid ? SG.profileFor(appid) : null;
+  const steamPlan = p ? planFor({ appid, win: !!p.win, linux: !!p.linux }, platform) : { ok: false };
+  const lgsm = script ? { method: 'lgsm', game: script, needsDocker: platform !== 'linux' } : null;
+  const steam = steamPlan.ok ? { method: 'steam', appid, needsDocker: !!steamPlan.needsDocker } : null;
+  const best = platform === 'linux' ? lgsm || steam : (steam && !steam.needsDocker ? steam : lgsm || steam);
+  if (!best) return null;
+  return { key: best.method === 'steam' ? `steam-${appid}` : script, name, ...best, short: script ? script.replace(/server$/, '') : null, gameAppId: p ? p.game : null };
+}
+
+/* LinuxGSM settings that most games share – shown as a small form (the raw .cfg stays available). */
+const LGSM_KEYS = ['servername', 'port', 'queryport', 'maxplayers', 'serverpassword', 'startparameters'];
+/** key="value" lines of a LinuxGSM .cfg (it is sourced by bash – read only literal assignments). */
+function parseShellVars(text) {
+  const out = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = line.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s#]*))/);
+    if (m) out[m[1]] = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4];
+  }
+  return out;
+}
+/** Set values in a LinuxGSM .cfg – values that bash could interpret ($, `, ", \, line breaks) are refused. */
+function setShellVars(content, updates) {
+  let text = String(content || '');
+  for (const [k, raw] of Object.entries(updates || {})) {
+    if (!/^[a-z][a-z0-9_]{0,40}$/.test(k)) throw Object.assign(new Error(T('Invalid setting')), { status: 400 });
+    const v = String(raw == null ? '' : raw);
+    if (/["$`\\\r\n]/.test(v) || v.length > 500) throw Object.assign(new Error(T('“{key}” contains characters that are not allowed (", $, `, \\ or line breaks).', { key: k })), { status: 400 });
+    const line = `${k}="${v}"`;
+    const re = new RegExp(`^\\s*${k}=.*$`, 'm');
+    text = re.test(text) ? text.replace(re, line) : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`;
+  }
+  return text;
+}
+/** Resource limits for Docker containers – cleaned (0 = no limit). */
+function cleanLimits(b) {
+  const cpus = Number(b && b.cpus) || 0;
+  const mem = Math.round(Number(b && b.memoryMb) || 0);
+  if (cpus && (cpus < 0.1 || cpus > 256)) throw Object.assign(new Error(T('CPU cores: between 0.1 and 256 (0 = no limit).')), { status: 400 });
+  if (mem && (mem < 256 || mem > 1048576)) throw Object.assign(new Error(T('Memory: between 256 MB and 1 TB (0 = no limit).')), { status: 400 });
+  return cpus || mem ? { cpus: cpus ? Math.round(cpus * 100) / 100 : 0, memoryMb: mem } : null;
+}
+
 class GameServers {
   constructor(host) {
     H = host;
     this.ctx = host.ctx;
-    core('jobs').registerResumer('game-setup', (p) => { const s = this.get(p.id); return this.isDocker(s) ? this.setupDockerJob(s) : this.setupNativeJob(s); }); // continue after a crash
+    core('jobs').registerResumer('game-setup', (p) => { const s = this.get(p.id); return this.isSteam(s) ? this.steamSetupJob(s) : this.isDocker(s) ? this.setupDockerJob(s) : this.setupNativeJob(s); }); // continue after a crash
     this.root = path.join(this.ctx.paths.base, 'spiele');
+    this.steam = new SteamServers(this, host);
+    this.apps = new SteamAppList({ dataDir: this.dataDir });
+    this.seen = new Set();
     this.timers = [];
     if (!process.env.HW_TEST) {
       this.timers.push(setInterval(() => this.monitorTick().catch(() => {}), IS_LINUX ? 5 * 60000 : 60000));
@@ -76,6 +140,10 @@ class GameServers {
   script(s) { return path.join(this.dir(s), s.game); }
   /** Docker mode (Windows/everywhere): official LinuxGSM image, one container per server, data in the volume. */
   isDocker(s) { return s.mode === 'docker'; }
+  /** Own data folder (SteamCMD, cached Steam list): <data>/game-servers */
+  get dataDir() { return path.join(this.ctx.paths.data || path.join(this.ctx.paths.base, 'data'), 'game-servers'); }
+  /** SteamCMD method (1.3) – everything else is LinuxGSM. */
+  isSteam(s) { return !!s && s.kind === 'steam'; }
   cname(s) { return `hostwerk-game-${s.id}`; }
   /** Get Docker ready: set up but off → start the engine; not there at all → error with a code (the interface offers the install). */
   async dockerReady() {
@@ -177,20 +245,128 @@ class GameServers {
       // Take the game's ports from the image (EXPOSE) and publish them 1:1
       const insp = await this.dx(['image', 'inspect', image, '--format', '{{json .Config.ExposedPorts}}'], { ok: true });
       let ports = []; try { ports = Object.keys(JSON.parse(insp.stdout.trim() || '{}')).map((p) => { const [port, proto] = p.split('/'); return { port: Number(port), proto: (proto || 'tcp').toUpperCase() }; }); } catch { /* none */ }
-      s.ports = ports; s.restartFixed = true; this.ctx.settings.save();
-      const pub = ports.flatMap((p) => ['-p', `${p.port}:${p.port}/${p.proto.toLowerCase()}`]);
+      if (!s.portsCustom) s.ports = ports;
+      ports = s.ports;
+      s.restartFixed = true; this.ctx.settings.save();
       job.progress(60, T('Creating the container …'));
       await this.dx(['rm', '-f', this.cname(s)], { ok: true });
-      // No Docker restart policy: otherwise Docker starts the server on every engine start by itself – no matter what
-      // "Start with Hostwerk" says. Starting with Hostwerk and restarting after a crash is done by Hostwerk itself.
-      await this.dx(['create', '--name', this.cname(s), '--restart', 'no', '-v', `hw-game-${s.id}:/data`, '-e', 'UPDATE_ON_START=1', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, image], { timeout: 120000 });
+      await this.dx(this.lgsmCreateArgs(s), { timeout: 120000 });
+      s.specHash = this.lgsmSpecHash(s); this.ctx.settings.save();
       if (autoInstall) { job.progress(70, T('Starting the container – it installs the game on the first start (SteamCMD, can take long) …')); await this.dx(['start', this.cname(s)]); }
       s.installed = true; this.ctx.settings.save(); this.broadcast({ type: 'games' });
       job.log(T('Ports: {ports} – the installation progress is in the console.', { ports: ports.map((p) => `${p.port}/${p.proto}`).join(', ') || T('none found') }));
       return { id, ports };
     }, { key: 'game-create-' + id, resume: { kind: 'game-setup', params: { id } } });
   }
+  /*
+   * LinuxGSM container: ports 1:1, data in the volume, limits. No Docker restart policy: otherwise Docker starts the server
+   * on every engine start by itself – no matter what "Start with Hostwerk" says. Starting with Hostwerk and restarting after
+   * a crash is done by Hostwerk itself.
+   */
+  lgsmCreateArgs(s) {
+    const image = `gameservermanagers/gameserver:${s.game.replace(/server$/, '')}`;
+    const pub = (s.ports || []).flatMap((p) => (/tcp/i.test(p.proto) && /udp/i.test(p.proto) ? ['tcp', 'udp'] : [String(p.proto || 'tcp').toLowerCase()]).flatMap((pr) => ['-p', `${p.port}:${p.port}/${pr}`]));
+    return ['create', '--name', this.cname(s), '--restart', 'no', '-v', `hw-game-${s.id}:/data`, '-e', 'UPDATE_ON_START=1', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, ...this.steam.limitArgs(s.limits), image];
+  }
+  lgsmSpecHash(s) { return crypto.createHash('sha1').update(JSON.stringify(this.lgsmCreateArgs(s))).digest('hex').slice(0, 16); }
+  /** Ports or limits changed → create the container anew (data stays in the volume). Older containers without a hash are kept. */
+  async ensureLgsmContainer(s) {
+    const hash = this.lgsmSpecHash(s);
+    if (!s.specHash) { s.specHash = hash; this.ctx.settings.save(); return false; }
+    if (s.specHash === hash) return false;
+    await this.dx(['rm', '-f', this.cname(s)], { ok: true });
+    await this.dx(this.lgsmCreateArgs(s), { timeout: 120000 });
+    s.specHash = hash; this.ctx.settings.save();
+    return true;
+  }
   env() { return { ...process.env, LGSM_GITHUBUSER: 'GameServerManagers', TERM: 'xterm', LANG: 'C.UTF-8', HOME: process.env.HOME || os.homedir(), CI: '1' }; }
+
+  /* ---------- one-step setup (both methods) ---------- */
+  /** Steam server: install (+ start) as a job – also to continue after a crash. */
+  steamSetupJob(s, { start = false } = {}) {
+    return core('jobs').runJob(T('Set up game server “{name}”', { name: s.name }), async (job) => {
+      await this.steam.install(job, s);
+      this.broadcast({ type: 'games' });
+      if (start) { job.progress(96, T('Starting the server …')); await this.steam.start(job, s); await this.refresh(s).catch(() => {}); this.broadcast({ type: 'games' }); }
+      return { id: s.id, installed: true };
+    }, { key: 'game-create-' + s.id, resume: { kind: 'game-setup', params: { id: s.id } } });
+  }
+
+  /**
+   * One flow from "pick a game" to a running server, shown as ONE job with clear steps:
+   *   1. Docker (only if the chosen way needs it): set up Hostwerk's Docker engine if missing (installDocker: true), start it if off
+   *   2. Install the game server (LinuxGSM or SteamCMD)
+   *   3. Start it (start: true)
+   * Without installDocker a missing Docker is reported with the code DOCKER_MISSING (the interface asks and repeats).
+   */
+  async setup(b = {}) {
+    const method = b.method === 'steam' ? 'steam' : 'lgsm';
+    let needsDocker;
+    let s;
+    if (method === 'steam') {
+      const app = this.apps.find(b.appid) || { appid: Number(b.appid), win: null, linux: null };
+      const plan = planFor(app);
+      if (!plan.ok) throw Object.assign(new Error(this.steam.planText(plan)), { status: 400 });
+      needsDocker = plan.needsDocker;
+      if (needsDocker && !b.installDocker && !(await this.dockerInstalled())) throw dockerMissing(b.name || app.name);
+      s = this.steam.create(b, app);
+    } else {
+      const mode = b.mode === 'docker' || b.mode === 'native' ? b.mode : IS_LINUX ? 'native' : 'docker';
+      if (mode === 'native') this.requireLinux();
+      if (!/^[a-z0-9]+server$|^[a-z0-9]+$/.test(String(b.game || ''))) throw Object.assign(new Error(T('Invalid game')), { status: 400 });
+      needsDocker = mode === 'docker';
+      if (needsDocker && !b.installDocker && !(await this.dockerInstalled())) throw dockerMissing(b.name);
+      const id = `${String(b.game).replace(/server$/, '')}-${crypto.randomBytes(2).toString('hex')}`;
+      s = { id, game: String(b.game), name: this.uniqueName(String(b.name || FAVORITES[b.game] || b.game).replace(/[\u0000-\u001f]/g, '').slice(0, 60)), createdAt: Date.now(), installed: false, autostart: false, monitor: true, ...(mode === 'docker' ? { mode: 'docker', ports: [] } : {}) };
+      this.rememberGameName(s);
+      this.list().push(s); this.ctx.settings.save();
+      if (mode === 'native') fs.mkdirSync(this.dir(s), { recursive: true });
+    }
+    const start = b.start !== false;
+    const steps = [needsDocker && 'docker', 'install', start && 'start'].filter(Boolean);
+    const stepText = (k, text) => T('Step {n} of {total}: {text}', { n: steps.indexOf(k) + 1, total: steps.length, text });
+    this.broadcast({ type: 'games' });
+    const job = core('jobs').runJob(T('Set up game server “{name}”', { name: s.name }), async (j) => {
+      if (needsDocker) {
+        j.progress(2, stepText('docker', T('Docker')));
+        if (!(await this.dockerInstalled())) {
+          if (!this.ctx.docker) throw new Error(T('Docker is missing.'));
+          j.log(T('Docker is not set up yet – Hostwerk sets up its own Docker engine (Windows may ask for administrator rights).'));
+          const dj = process.platform === 'win32' && typeof this.ctx.docker.installWsl === 'function' ? this.ctx.docker.installWsl() : this.ctx.docker.install({ engine: 'wsl', acceptLicense: true });
+          const r = await dj.promise;
+          if (r && r.restartNeeded) { j.log(T('Windows has to restart once to finish WSL – then open the server and choose “Continue installation”.')); return { id: s.id, restartNeeded: true }; }
+        }
+        await this.dockerReady();
+      }
+      j.progress(10, stepText('install', method === 'steam' ? T('Installing through SteamCMD (can take long) …') : T('Installing through LinuxGSM (can take long) …')));
+      // Progress of the install step stays inside "Step n of m" (10–95 %), so the interface can show the steps all the time
+      const stepJob = { ...j, progress: (p, text) => j.progress(10 + 0.85 * p, stepText('install', text || T('Installing …'))), log: (l) => j.log(l), onCancel: (f) => (j.onCancel ? j.onCancel(f) : () => {}) };
+      if (method === 'steam') await this.steam.install(stepJob, s);
+      else {
+        const inner = this.isDocker(s) ? this.setupDockerJob(s, start) : this.setupNativeJob(s, true); // the LinuxGSM container installs and starts in one go
+        const mirror = setInterval(() => { if (typeof inner.progress_ === 'number') stepJob.progress(inner.progress_, inner.text); }, 1000);
+        try { await inner.promise; } finally { clearInterval(mirror); }
+      }
+      this.broadcast({ type: 'games' });
+      if (start) {
+        j.progress(96, stepText('start', T('Starting the server …')));
+        if (method === 'steam') await this.steam.start(j, s);
+        else if (!this.isDocker(s)) await this.run(s.id, 'start').promise;
+        await this.refresh(s).catch(() => {});
+        this.broadcast({ type: 'games' });
+      }
+      return { id: s.id, installed: !!s.installed, steps };
+    }, { key: 'game-quick-' + s.id });
+    return { job: job.id, id: s.id, steps };
+  }
+
+  /** Popular games with the best way for this system (for the empty page). */
+  async quickPicks() {
+    const platform = hostPlatform();
+    const docker = await this.dockerAvailable().catch(() => false);
+    const dockerInstalled = docker || (await this.dockerInstalled().catch(() => false));
+    return { platform, linux: IS_LINUX, docker, dockerInstalled, picks: PICKS.map((x) => pickFor(x, platform)).filter(Boolean) };
+  }
 
   runInJob(job, s, args, opts = {}) { return this.ctx.devtools.runInJob(job, this.script(s), args, { cwd: this.dir(s), env: this.env(), noInput: true, idleMs: opts.idleMs || 10 * 60000 }); }
 
@@ -200,6 +376,7 @@ class GameServers {
    * Cached for 6 h; fresh after "Update LinuxGSM".
    */
   async commandsFor(s, { fresh = false } = {}) {
+    if (this.isSteam(s)) return ['start', 'stop', 'restart', 'update', 'validate', 'backup'].map((cmd) => ({ cmd, short: null, desc: COMMANDS[cmd] }));
     if (!fresh && s.cmds && Date.now() - s.cmds.at < 6 * 3600e3) return s.cmds.list;
     let out = '';
     try {
@@ -219,6 +396,7 @@ class GameServers {
 
   run(id, command, extra = []) {
     const s = this.get(id);
+    if (this.isSteam(s)) return this.steam.run(s, command);
     if (this.isDocker(s)) return this.runDocker(s, command, extra);
     this.requireLinux();
     const { exec } = core('util');
@@ -256,7 +434,15 @@ class GameServers {
         await this.refresh(s); this.broadcast({ type: 'games' });
         return { ok: true, text: T('Ended right away (forced).') };
       }
-      if (command === 'start') { await this.dx(['start', c]); await this.refresh(s); this.broadcast({ type: 'games' }); return { ok: true, text: T('Container started (LinuxGSM starts the server inside).') }; }
+      if (command === 'restart' && s.specHash && s.specHash !== this.lgsmSpecHash(s)) {
+        // Ports or limits changed: stop, create the container anew, start
+        await this.dx(['exec', c, `./${s.game}`, 'stop'], { ok: true, timeout: 120000 });
+        await this.dx(['stop', '-t', '30', c], { ok: true, timeout: 90000 });
+        await this.ensureLgsmContainer(s);
+        await this.dx(['start', c]); await this.refresh(s); this.broadcast({ type: 'games' });
+        return { ok: true, text: T('Container created anew with the new settings and started.') };
+      }
+      if (command === 'start') { await this.ensureLgsmContainer(s); await this.dx(['start', c]); await this.refresh(s); this.broadcast({ type: 'games' }); return { ok: true, text: T('Container started (LinuxGSM starts the server inside).') }; }
       if (command === 'stop') {
         await this.dx(['exec', c, `./${s.game}`, 'stop'], { ok: true, timeout: 120000 });
         await this.dx(['stop', '-t', '30', c], { timeout: 90000 });
@@ -282,6 +468,7 @@ class GameServers {
     if (r.code === 0) { s.restartFixed = true; this.ctx.settings.save(); }
   }
   async running(s) {
+    if (this.isSteam(s)) return this.steam.running(s);
     if (this.isDocker(s)) await this.fixRestartPolicy(s).catch(() => {});
     if (this.isDocker(s)) { const r = await this.dx(['inspect', '--format', '{{.State.Running}}', this.cname(s)], { ok: true, timeout: 15000 }); return r.stdout.trim() === 'true'; }
     // LinuxGSM starts the game in a tmux session named like the script
@@ -318,6 +505,7 @@ class GameServers {
     if (r && r.cfg && r.cfg.auto && typeof r.sync === 'function') r.sync().catch(() => {});
   }
   async consoleLogAsync(s, n = 300) {
+    if (this.isSteam(s)) return this.steam.consoleLines(s, n);
     if (this.isDocker(s)) { const r = await this.dx(['logs', '--tail', String(n), this.cname(s)], { ok: true, timeout: 20000 }); return (r.stdout + r.stderr).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').split('\n').filter(Boolean); }
     return this.consoleLog(s, n);
   }
@@ -328,11 +516,90 @@ class GameServers {
     return files[0] ? core('util').readLastLines(path.join(dir, files[0].f), n) : [];
   }
   async configAsync(s) {
+    if (this.isSteam(s)) return { file: null, content: '', defaults: '', steam: true };
     if (!this.isDocker(s)) return this.config(s);
     const rel = `/data/config-lgsm/${s.game}/${s.game}.cfg`;
-    const r = await this.dx(['exec', this.cname(s), 'cat', rel], { ok: true });
-    const d = await this.dx(['exec', this.cname(s), 'cat', `/data/config-lgsm/${s.game}/_default.cfg`], { ok: true });
-    return { file: rel, content: r.code === 0 ? r.stdout : '', defaults: (d.stdout || '').slice(0, 60000) };
+    // docker cp also works while the container is stopped (docker exec does not)
+    const read = async (p) => {
+      const tmp = path.join(this.ctx.paths.cache, `gs-${s.id}-${crypto.randomBytes(3).toString('hex')}.cfg`);
+      const r = await this.dx(['cp', `${this.cname(s)}:${p}`, tmp], { ok: true });
+      try { return r.code === 0 && fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : ''; } finally { fs.rmSync(tmp, { force: true }); }
+    };
+    return { file: rel, content: await read(rel), defaults: (await read(`/data/config-lgsm/${s.game}/_default.cfg`)).slice(0, 60000) };
+  }
+  /** Common LinuxGSM settings (name, port, slots, password, start parameters) – those the game's _default.cfg has. */
+  async quickGet(s) {
+    const cfg = await this.configAsync(s);
+    const defs = parseShellVars(cfg.defaults);
+    const own = parseShellVars(cfg.content);
+    const keys = LGSM_KEYS.filter((k) => k in defs || k in own);
+    return { keys, values: Object.fromEntries(keys.map((k) => [k, k in own ? own[k] : defs[k]])), defaults: Object.fromEntries(keys.map((k) => [k, defs[k] ?? ''])) };
+  }
+  async quickSet(s, updates) {
+    const cur = await this.quickGet(s);
+    const want = {};
+    for (const k of cur.keys) if (typeof (updates || {})[k] === 'string' && updates[k] !== cur.values[k]) want[k] = updates[k];
+    if (want.port !== undefined || want.queryport !== undefined) for (const k of ['port', 'queryport']) if (want[k] !== undefined && !/^\d{1,5}$/.test(want[k])) throw Object.assign(new Error(T('Ports are numbers between 1 and 65535.')), { status: 400 });
+    if (want.maxplayers !== undefined && !/^\d{1,4}$/.test(want.maxplayers)) throw Object.assign(new Error(T('Max players is a number.')), { status: 400 });
+    if (!Object.keys(want).length) return { ...cur, changed: false };
+    const cfg = await this.configAsync(s);
+    await this.setConfigAsync(s, setShellVars(cfg.content, want));
+    // Docker: move the published ports along with the game port (takes effect with the next restart – the container is created anew)
+    if (want.port !== undefined && this.isDocker(s)) {
+      const delta = Number(want.port) - Number(cur.values.port);
+      if (delta && Number.isFinite(delta) && (s.ports || []).length) {
+        s.ports = s.ports.map((p) => ({ ...p, port: p.port + delta })).filter((p) => p.port >= 1 && p.port <= 65535);
+        s.portsCustom = true; s.detail = null; this.ctx.settings.save();
+      }
+    }
+    if (want.port !== undefined) { s.detail = null; s.queryPort = null; this.ctx.settings.save(); }
+    return { ...(await this.quickGet(s)), changed: true };
+  }
+  /** Settings of a Steam server (name/port/slots/password/start line/backups). */
+  steamSet(s, b) {
+    try { return this.steamSetRaw(s, b); } catch (e) { throw Object.assign(new Error(T(e.message)), { status: e.status || 400 }); }
+  }
+  steamSetRaw(s, b) {
+    const p = SG.profileFor(s.appid);
+    if (b.port !== undefined) { const n = Number(b.port); if (!Number.isInteger(n) || n < 1 || n > 65535) throw Object.assign(new Error(T('Ports are numbers between 1 and 65535.')), { status: 400 }); s.port = n; }
+    if (b.maxPlayers !== undefined) { const n = Number(b.maxPlayers); if (!Number.isInteger(n) || n < 1 || n > 1000) throw Object.assign(new Error(T('Max players is a number.')), { status: 400 }); s.maxPlayers = n; }
+    if (b.password !== undefined) {
+      const v = String(b.password);
+      if (/[\s"'`$\\]/.test(v) || v.length > 40) throw Object.assign(new Error(T('The password may not contain spaces, quotes, $ or \\ (at most 40 characters).')), { status: 400 });
+      if (p && p.passwordMin && v.length < p.passwordMin) throw Object.assign(new Error(T('{game} needs a password with at least {n} characters.', { game: p.name, n: p.passwordMin })), { status: 400 });
+      s.password = v;
+    }
+    if (b.extraArgs !== undefined) { SG.splitArgs(b.extraArgs); s.extraArgs = String(b.extraArgs).slice(0, 2000); }
+    if (b.customExe !== undefined || b.customArgs !== undefined) {
+      const exe = String(b.customExe ?? (s.custom && s.custom.exe) ?? '').trim();
+      if (exe) safeRel(this.dir(s), exe);
+      const args = String(b.customArgs ?? (s.custom && s.custom.args) ?? '');
+      SG.splitArgs(args);
+      s.custom = exe || args.trim() || !p ? { exe, args: args.slice(0, 2000) } : null;
+    }
+    if (b.customPorts !== undefined) s.customPorts = String(b.customPorts).trim() ? SG.parsePortList(b.customPorts) : null;
+    if (b.saves !== undefined) { const v = String(b.saves).trim(); if (v) safeRel(this.dir(s), v); s.saves = v || null; }
+    if (b.backupKeep !== undefined) s.backupKeep = Math.max(1, Math.min(100, Number(b.backupKeep) || 10));
+    if (b.extraConfig !== undefined) { const v = String(b.extraConfig).trim(); if (v) { safeRel(this.dir(s), v); this.steam.checkText(v); s.extraConfigs = [...new Set([...(s.extraConfigs || []), v])].slice(0, 20); } }
+    s.ports = SG.portsFor(s);
+    s.queryPort = null;
+    this.ctx.settings.save();
+    if (s.public) this.portsChanged();
+    return this.info(s);
+  }
+  /** CPU/RAM limits for Docker containers – applied right away if possible, otherwise with the next start. */
+  async setLimits(s, b) {
+    if (!this.isDocker(s)) throw Object.assign(new Error(T('Limits only work for servers in Docker containers.')), { status: 400 });
+    s.limits = cleanLimits(b);
+    this.ctx.settings.save();
+    let live = false;
+    if (s.limits && (await this.dockerAvailable())) {
+      const args = ['update'];
+      if (s.limits.cpus) args.push('--cpus', String(s.limits.cpus));
+      if (s.limits.memoryMb) args.push('--memory', `${s.limits.memoryMb}m`, '--memory-swap', `${s.limits.memoryMb}m`);
+      if (args.length > 1) { const r = await this.dx([...args, this.cname(s)], { ok: true, timeout: 30000 }); live = r.code === 0; }
+    }
+    return { limits: s.limits, live };
   }
   async setConfigAsync(s, content) {
     if (!this.isDocker(s)) return this.setConfig(s, content);
@@ -348,6 +615,7 @@ class GameServers {
   setConfig(s, content) { const { file } = this.config(s); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, String(content)); return this.config(s); }
   /** Ports from "details" (for forwarding). */
   async details(s) {
+    if (this.isSteam(s)) return { text: '', ports: this.portsOf(s), info: {} };
     let r;
     if (this.isDocker(s)) r = await this.dx(['exec', this.cname(s), `./${s.game}`, 'details'], { ok: true, timeout: 60000 });
     else { this.requireLinux(); r = await core('util').exec(this.script(s), ['details'], { cwd: this.dir(s), env: this.env(), timeout: 60000 }); }
@@ -355,10 +623,11 @@ class GameServers {
     if (ports.length) { s.detail = { ports, at: Date.now() }; s.queryPort = null; this.ctx.settings.save(); }
     return { text, ports, info };
   }
-  backups(s) { const d = path.join(this.dir(s), 'backups'); if (!fs.existsSync(d)) return []; return fs.readdirSync(d).filter((f) => /\.tar\.gz$/.test(f)).map((f) => { const st = fs.statSync(path.join(d, f)); return { file: f, size: st.size, time: st.mtimeMs }; }).sort((a, b) => b.time - a.time); }
+  backups(s) { if (this.isSteam(s)) return this.steam.backups(s); const d = path.join(this.dir(s), 'backups'); if (!fs.existsSync(d)) return []; return fs.readdirSync(d).filter((f) => /\.tar\.gz$/.test(f)).map((f) => { const st = fs.statSync(path.join(d, f)); return { file: f, size: st.size, time: st.mtimeMs }; }).sort((a, b) => b.time - a.time); }
   async remove(id, { files = false } = {}) {
     const s = this.get(id);
-    if (this.isDocker(s)) { await this.dx(['rm', '-f', this.cname(s)], { ok: true }); if (files) await this.dx(['volume', 'rm', `hw-game-${s.id}`], { ok: true }); }
+    if (this.isSteam(s)) await this.steam.remove(s, { files });
+    else if (this.isDocker(s)) { await this.dx(['rm', '-f', this.cname(s)], { ok: true }); if (files) await this.dx(['volume', 'rm', `hw-game-${s.id}`], { ok: true }); }
     else if (IS_LINUX && (await this.running(s))) await this.run(id, 'stop').promise.catch(() => {});
     this.cfg.servers = this.list().filter((x) => x.id !== id);
     this.ctx.settings.save();
@@ -373,6 +642,7 @@ class GameServers {
     if (!this.dockerAutoDone && this.list().some((x) => x.autostart && this.isDocker(x)) && (await this.dockerAvailable())) { this.dockerAutoDone = true; await this.startAutostart({ docker: true }); }
     for (const s of this.list()) {
       if (!s.monitor || !s.installed) continue;
+      if (this.isSteam(s)) { if (!this.isDocker(s) || (await this.dockerAvailable())) await this.steam.monitor(s, this.seen).catch(() => {}); continue; }
       if (!this.isDocker(s)) { if (IS_LINUX) { try { await this.run(s.id, 'monitor').promise; } catch { /* reports itself */ } } continue; }
       if (!s.wantRun || !(await this.dockerAvailable())) continue;
       /*
@@ -382,7 +652,6 @@ class GameServers {
        */
       const st = await this.dx(['inspect', '--format', '{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}', this.cname(s)], { ok: true, timeout: 20000 });
       const [run, code, oom] = st.stdout.trim().split('|');
-      this.seen = this.seen || new Set();
       if (st.code !== 0) continue;
       if (run === 'true') { this.seen.add(s.id); continue; }
       const crashed = this.seen.has(s.id) && (oom === 'true' || (Number(code) !== 0 && Number(code) !== 143));
@@ -400,7 +669,7 @@ class GameServers {
   async updateTick() {
     if (!IS_LINUX) return;
     for (const s of this.list()) {
-      if (s.autoUpdate === false || !s.installed || this.isDocker(s)) continue;
+      if (s.autoUpdate === false || !s.installed || this.isDocker(s) || this.isSteam(s)) continue; // Steam servers update on start
       const running = await this.running(s).catch(() => false);
       if (running) { s.running = true; const live = await this.live(s).catch(() => null); if (!live || live.players > 0) continue; }
       try { await this.run(s.id, 'update').promise; } catch { /* next round */ }
@@ -410,6 +679,7 @@ class GameServers {
   async startAutostart({ docker = false } = {}) {
     for (const s of this.list()) {
       if (!s.autostart || !s.installed) continue;
+      if (this.isSteam(s) && !this.isDocker(s)) { if (!docker) this.run(s.id, 'start').promise.catch(() => {}); continue; }
       if (this.isDocker(s)) { if (docker && (await this.dockerAvailable()) && !(await this.running(s).catch(() => true))) this.run(s.id, 'start').promise.catch(() => {}); }
       else if (IS_LINUX && !docker) this.run(s.id, 'start').promise.catch(() => {});
     }
@@ -420,7 +690,7 @@ class GameServers {
   uniqueName(name) { const taken = new Set(this.list().map((x) => x.name)); if (!taken.has(name)) return name; for (let i = 2; ; i++) { const n = `${name.slice(0, 56)} ${i}`; if (!taken.has(n)) return n; } }
   rememberGameName(s) { this.games().then((list) => { const g = list.find((x) => x.game === s.game); if (g && s.gameName !== g.name) { s.gameName = g.name; s.short = g.short; this.ctx.settings.save(); } }).catch(() => {}); }
   /** Ports from "details" (LinuxGSM) or from the Docker image. */
-  portsOf(s) { return (s.detail && s.detail.ports) || (s.ports || []).map((p) => ({ name: 'Game', port: p.port, proto: p.proto })); }
+  portsOf(s) { return (s.detail && s.detail.ports) || (s.ports || []).map((p) => ({ name: p.name || 'Game', port: p.port, proto: p.proto })); }
   gamePort(s) { const ps = this.portsOf(s); const g = ps.find((p) => /^game|^server|^port$/i.test(p.name)) || ps.find((p) => /UDP/.test(p.proto)) || ps[0]; return g ? g.port : null; }
   /** Candidates for the query port: remembered one, "Query" ports, game port, game port + 1. */
   queryCandidates(s) {
@@ -441,7 +711,7 @@ class GameServers {
     if (k >= 0) { v = { ...answers[k], queryPort: cands[k] }; if (s.queryPort !== cands[k]) { s.queryPort = cands[k]; this.ctx.settings.save(); } }
     this.liveCache.set(s.id, { at: Date.now(), v });
     // No port details yet: read "details" once in the background (LinuxGSM knows the game's ports)
-    if (!s.detail && !this.detailBusy && s.installed) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
+    if (!s.detail && !this.detailBusy && s.installed && !this.isSteam(s)) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
     return v;
   }
   address(s) { const port = this.gamePort(s); return port ? { local: `localhost:${port}`, lan: lanIps().map((ip) => `${ip}:${port}`), port } : null; }
@@ -449,6 +719,7 @@ class GameServers {
   async send(s, command) {
     const c = String(command || '').replace(/[\r\n]/g, ' ').trim().slice(0, 300);
     if (!c) throw new Error(T('The command is missing.'));
+    if (this.isSteam(s)) return this.steam.send(s, c);
     const list = await this.commandsFor(s);
     if (!list.some((x) => x.cmd === 'send')) throw new Error(T('This game takes no console commands through LinuxGSM.'));
     const r = this.isDocker(s) ? await this.dx(['exec', this.cname(s), `./${s.game}`, 'send', c], { ok: true, timeout: 30000 }) : await core('util').exec(this.script(s), ['send', c], { cwd: this.dir(s), env: this.env(), timeout: 30000 });
@@ -456,31 +727,53 @@ class GameServers {
     return { ok: true };
   }
 
-  info(s) { return { ...s, dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume hw-game-${s.id})` : this.dir(s), script: s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s), backups: !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s), links: guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')),
+  info(s) {
+    const steam = this.isSteam(s);
+    const { secret, password, pid, ...pub } = s; // secrets only where the interface needs them (steam.adminPassword / password field)
+    return { ...pub, password: steam ? s.password || '' : undefined, method: steam ? 'steam' : 'lgsm', dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume hw-game-${s.id})` : this.dir(s), script: steam ? null : s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s),
+      backups: steam ? this.steam.backups(s).length : !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s),
+      links: steam ? steamLinks(s) : guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: steam ? this.steam.canSend(s) : !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')),
+      steam: steam ? this.steam.info(s) : null, limits: s.limits || null,
     // „Von außen erreichbar“: geht ab Hostwerk 2.11 (Ports an Firewall/Router); router/auto für den passenden Hinweis
-    outside: { supported: !!(this.ctx.security && this.ctx.security.addPortProvider), router: !!this.ctx.router, auto: !!(this.ctx.router && this.ctx.router.cfg && this.ctx.router.cfg.auto) } }; }
+    outside: { supported: !!(this.ctx.security && this.ctx.security.addPortProvider), router: !!this.ctx.router, auto: !!(this.ctx.router && this.ctx.router.cfg && this.ctx.router.cfg.auto) } };
+  }
   async infoLive(s) { const i = this.info(s); i.live = await this.live(s).catch(() => null); return i; }
   async dockerAvailable() { try { await this.ctx.docker.cli(); return true; } catch { return false; } }
   /** Docker there (CLI or Hostwerk's WSL engine), even if the engine is not running right now. */
   async dockerInstalled() { try { const st = await this.ctx.docker.status(); return !!(st.cli || st.wslAvailable); } catch { return false; } }
 
   /** Short list for Hostwerk's overview (dashboard, phone). */
-  summary() { return this.list().map((g) => ({ id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker' })); }
+  summary() { return this.list().map((g) => ({ id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm' })); }
 
   routes(r) {
     r.get('/games', async (req, res) => {
       const docker = await this.dockerAvailable(); const dockerInstalled = docker || await this.dockerInstalled();
-      for (const s of this.list()) { if (IS_LINUX || (docker && this.isDocker(s))) await this.refresh(s).catch(() => {}); else if (this.isDocker(s)) s.running = false; } // engine off → containers cannot run (no stale state)
+      for (const s of this.list()) { if ((this.isSteam(s) && !this.isDocker(s)) || IS_LINUX || (docker && this.isDocker(s))) await this.refresh(s).catch(() => {}); else if (this.isDocker(s)) s.running = false; } // engine off → containers cannot run (no stale state)
       for (const s of this.list()) if (!s.gameName) this.rememberGameName(s);
       res.json({ linux: IS_LINUX, docker, dockerInstalled, servers: await Promise.all(this.list().map((s) => this.infoLive(s))), requirements: await this.requirements().catch(() => null) });
     });
     r.get('/games/catalog', async (req, res) => res.json({ games: await this.games(), favorites: FAVORITES }));
-    r.post('/games', async (req, res) => { if (!IS_LINUX && (req.body || {}).mode !== 'native' && !(await this.dockerInstalled())) throw dockerMissing((req.body || {}).name); res.json({ job: this.create(req.body || {}).id }); });
-    r.get('/games/:id', async (req, res) => { const s = this.get(req.params.id); if (this.isDocker(s) && !(await this.dockerAvailable())) s.running = false; else if (IS_LINUX || this.isDocker(s)) await this.refresh(s).catch(() => {}); res.json(await this.infoLive(s)); });
+    r.get('/games/quick-picks', async (req, res) => res.json(await this.quickPicks()));
+    // Steam server tools: one page per request, searched here (the list itself stays on the server)
+    r.get('/games/steam/apps', (req, res) => {
+      const out = this.apps.search({ q: req.query.q, offset: req.query.offset, limit: req.query.limit });
+      const platform = hostPlatform();
+      out.items = out.items.map((x) => { const plan = planFor(x, platform); return { ...x, plan: plan.ok ? { mode: plan.mode, needsDocker: plan.needsDocker, custom: plan.custom } : { reason: plan.reason } }; });
+      res.json(out);
+    });
+    r.post('/games/steam/apps/refresh', async (req, res) => { await this.apps.refresh({ force: !!(req.body || {}).force }); res.json(this.apps.state()); });
+    r.post('/games', async (req, res) => res.json(await this.setup(req.body || {})));
+    r.get('/games/:id', async (req, res) => { const s = this.get(req.params.id); if (this.isDocker(s) && !(await this.dockerAvailable())) s.running = false; else if (this.isSteam(s) || IS_LINUX || this.isDocker(s)) await this.refresh(s).catch(() => {}); res.json(await this.infoLive(s)); });
+    r.get('/games/:id/quick', async (req, res) => { const s = this.get(req.params.id); res.json(this.isSteam(s) ? { steam: true } : await this.quickGet(s)); });
+    r.put('/games/:id/quick', async (req, res) => { const s = this.get(req.params.id); res.json(this.isSteam(s) ? this.steamSet(s, req.body || {}) : await this.quickSet(s, req.body || {})); });
+    r.put('/games/:id/limits', async (req, res) => res.json(await this.setLimits(this.get(req.params.id), req.body || {})));
+    r.get('/games/:id/textfile', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Only for Steam servers – LinuxGSM uses its .cfg.')), { status: 400 }); res.json(await this.steam.readText(s, req.query.path)); });
+    r.put('/games/:id/textfile', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Only for Steam servers – LinuxGSM uses its .cfg.')), { status: 400 }); res.json(await this.steam.writeText(s, (req.body || {}).path, (req.body || {}).content)); });
+    r.post('/games/:id/backups/:file/restore', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Restoring LinuxGSM backups: see the LinuxGSM guide (the archive holds the whole server).')), { status: 400 }); res.json(await this.steam.restore(s, req.params.file)); });
     r.get('/games/:id/players', async (req, res) => { const s = this.get(req.params.id); const live = await this.live(s); res.json({ live, players: live ? (await core('a2s').queryPlayers('127.0.0.1', live.queryPort, 1200).catch(() => null)) || [] : [] }); });
     r.post('/games/:id/send', async (req, res) => res.json(await this.send(this.get(req.params.id), (req.body || {}).command)));
-    r.delete('/games/:id/backups/:file', (req, res) => { const s = this.get(req.params.id); const f = path.basename(req.params.file); if (!/\.tar\.gz$/.test(f)) throw new Error(T('Not a backup')); fs.rmSync(path.join(this.dir(s), 'backups', f), { force: true }); res.json({ ok: true }); });
-    r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string') s.name = b.name.slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate', 'public']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); if (typeof b.public === 'boolean') this.portsChanged(); res.json(this.info(s)); });
+    r.delete('/games/:id/backups/:file', (req, res) => { const s = this.get(req.params.id); const f = path.basename(req.params.file); if (!(this.isSteam(s) ? /\.(zip|tar\.gz)$/ : /\.tar\.gz$/).test(f)) throw new Error(T('Not a backup')); fs.rmSync(path.join(this.dir(s), 'backups', f), { force: true }); res.json({ ok: true }); });
+    r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string' && b.name.trim()) s.name = b.name.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate', 'public']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); if (typeof b.public === 'boolean') this.portsChanged(); res.json(this.info(s)); });
     r.delete('/games/:id', async (req, res) => { await this.remove(req.params.id, { files: req.query.files === '1' }); res.json({ ok: true }); });
     r.get('/games/:id/commands', async (req, res) => res.json(await this.commandsFor(this.get(req.params.id), { fresh: req.query.fresh === '1' })));
     r.get('/games/:id/console', async (req, res) => res.json({ lines: await this.consoleLogAsync(this.get(req.params.id), Number(req.query.n) || 300) }));
@@ -490,6 +783,17 @@ class GameServers {
     r.get('/games/:id/backups', (req, res) => { const s = this.get(req.params.id); res.json(this.isDocker(s) ? [] : this.backups(s)); });
     r.post('/games/:id/:command', async (req, res) => { if (!/^(stop|kill)$/.test(req.params.command)) await this.needDocker(this.get(req.params.id)); res.json({ job: this.run(req.params.id, req.params.command, (req.body || {}).args).id }); });
   }
+}
+
+/** Guides for a Steam server tool – built from the app ids only (no list of links to keep up to date). */
+function steamLinks(s) {
+  const q = encodeURIComponent(s.gameName || s.name);
+  return [
+    { id: 'steamdb', label: 'SteamDB', text: 'The server tool: depots, launch options, size', url: `https://steamdb.info/app/${Number(s.appid)}/` },
+    { id: 'steam', label: 'Steam', text: 'The game in the Steam store', url: s.gameAppId ? `https://store.steampowered.com/app/${Number(s.gameAppId)}/` : `https://store.steampowered.com/search/?term=${q}` },
+    { id: 'wiki', label: 'PCGamingWiki', text: 'Technical info, ports and server notes', url: `https://www.pcgamingwiki.com/w/index.php?search=${q}` },
+    { id: 'guide', label: 'Guide: dedicated server', text: 'Web search for guides for this game', url: `https://duckduckgo.com/?q=${encodeURIComponent(`${s.gameName || s.name} dedicated server guide`)}` },
+  ];
 }
 
 /** Commands from LinuxGSM's help output: "start  st | Start the server." */
@@ -509,4 +813,4 @@ function parseDetails(raw) {
   return { text, ports, info };
 }
 
-module.exports = { GameServers, COMMANDS, FAVORITES, IS_LINUX, parseCommands, parseDetails, guideLinks };
+module.exports = { GameServers, COMMANDS, FAVORITES, IS_LINUX, PICKS, pickFor, parseCommands, parseDetails, guideLinks, steamLinks, parseShellVars, setShellVars, cleanLimits, LGSM_KEYS };
