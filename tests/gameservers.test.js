@@ -107,3 +107,23 @@ test('every command label, favourite hint and guide text has German', () => {
   for (const l of guideLinks('vhserver', 'Valheim')) { assert.ok(de[l.label], l.label); assert.ok(de[l.text], l.text); }
   for (const [k, v] of Object.entries(de)) if (k !== '$patterns') assert.ok(typeof v === 'string' && v.trim(), k);
 });
+
+test('reachable from outside: only running public servers report their ports (TCP/UDP), the router follows in automatic mode', async () => {
+  const h = fakeHost();
+  let synced = 0;
+  h.ctx.router = { cfg: { auto: true }, sync: async () => { synced++; return {}; } };
+  const providers = new Map();
+  h.ctx.security = { addPortProvider: (id, fn) => providers.set(id, fn), removePortProvider: (id) => providers.delete(id) };
+  const g = new GameServers(h);
+  h.S.games = { servers: [
+    { id: 'a', name: 'Valheim', game: 'vhserver', public: true, running: true, detail: { ports: [{ name: 'Game', port: 2456, proto: 'udp' }, { name: 'Query', port: 2457, proto: 'tcp+udp' }] } },
+    { id: 'b', name: 'Rust', game: 'rustserver', public: true, running: false, detail: { ports: [{ name: 'Game', port: 28015, proto: 'udp' }] } },
+    { id: 'c', name: 'CS2', game: 'cs2server', public: false, running: true, detail: { ports: [{ name: 'Game', port: 27015, proto: 'udp' }] } },
+  ] };
+  assert.deepStrictEqual(g.publicPorts().map((p) => `${p.port}/${p.proto}`), ['2456/UDP', '2457/TCP', '2457/UDP']);
+  g.portsChanged();
+  assert.strictEqual(synced, 1);
+  h.ctx.router.cfg.auto = false; g.portsChanged();
+  assert.strictEqual(synced, 1, 'without automatic mode the router is left alone');
+  assert.strictEqual(g.info(h.S.games.servers[0]).outside.supported, true);
+});

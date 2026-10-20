@@ -148,6 +148,11 @@ function OverviewTab({ s, reload }) {
             )}
             <div className="card-body stack" style={{ gap: 8, borderTop: '1px solid var(--line)' }}>
               <SettingRow title="Start with Hostwerk" text="Start automatically when Hostwerk (service) starts."><Switch checked={!!s.autostart} onChange={async (v) => { await put(`/games/${s.id}`, { autostart: v }); reload(); }} /></SettingRow>
+              {s.outside && s.outside.supported && (
+                <SettingRow title="Reachable from outside" text={!s.outside.router ? t('Opens the ports in the firewall while the server runs. For the router too, install “Router & port forwarding”.') : s.outside.auto ? t('While the server runs, Hostwerk opens its ports in the firewall and the router – when it stops, they close again.') : t('Opens the ports in the firewall while the server runs. Turn on the automatic mode under Live → Router so the router follows too.')}>
+                  <Switch checked={!!s.public} onChange={async (v) => { await put(`/games/${s.id}`, { public: v }); reload(); }} />
+                </SettingRow>
+              )}
               <SettingRow title="Update automatically" text={s.docker ? t('In Docker mode the game updates itself on every start of the server.') : t('Every 6 hours – only when the server is stopped or nobody plays.')}><Switch checked={s.docker || s.autoUpdate !== false} disabled={s.docker} onChange={async (v) => { await put(`/games/${s.id}`, { autoUpdate: v }); reload(); }} /></SettingRow>
               <SettingRow title="Monitor" text="“monitor” every 5 minutes – LinuxGSM restarts the server after a crash."><Switch checked={s.monitor !== false} onChange={async (v) => { await put(`/games/${s.id}`, { monitor: v }); reload(); }} /></SettingRow>
             </div>

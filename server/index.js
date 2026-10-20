@@ -10,7 +10,9 @@ exports.activate = (host) => {
   games.routes(host.router);
   // "Start with Hostwerk": native servers right away, Docker servers once the engine is ready (monitor tick)
   host.on('autostart', () => (process.env.HW_TEST ? [] : [() => games.startAutostart()]));
-  host.on('shutdown', () => games.stop());
+  // Synergie mit Router & Portfreigaben: „von außen erreichbar“ → Firewall und Router-Automatik (Hostwerk ab 2.11)
+  if (host.ctx.security && typeof host.ctx.security.addPortProvider === 'function') host.ctx.security.addPortProvider('game-servers', () => games.publicPorts());
+  host.on('shutdown', () => { if (host.ctx.security && host.ctx.security.removePortProvider) host.ctx.security.removePortProvider('game-servers'); return games.stop(); });
 };
 
 exports.deactivate = () => {};

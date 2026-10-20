@@ -289,8 +289,33 @@ class GameServers {
     return r.code === 0;
   }
   async refresh(s) {
+    const before = !!s.running;
     try { s.running = await this.running(s); } catch { s.running = false; }
+    if (s.public && before !== !!s.running) this.portsChanged(); // öffentlicher Server gestartet/gestoppt → Router nachziehen
     return s.running;
+  }
+
+  /**
+   * Ports der Server, die „von außen erreichbar“ sein sollen und gerade laufen – Hostwerk (ab 2.11) nimmt sie in die
+   * Firewall und die Router-Automatik auf; stoppt der Server, fallen sie wieder heraus und der Router schließt sie.
+   */
+  publicPorts() {
+    const out = [];
+    for (const s of this.list()) {
+      if (!s.public || !s.running) continue;
+      for (const p of this.portsOf(s)) {
+        const port = Number(p.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+        const proto = String(p.proto || '').toLowerCase();
+        for (const pr of /udp/.test(proto) && /tcp/.test(proto) ? ['TCP', 'UDP'] : [/udp/.test(proto) ? 'UDP' : 'TCP']) out.push({ port, proto: pr, label: `${s.name} (${p.name || 'Game'})` });
+      }
+    }
+    return out;
+  }
+  /** Geänderte Ports gleich an den Router geben, wenn dessen Automatik an ist (sonst beim nächsten Durchlauf). */
+  portsChanged() {
+    const r = this.ctx.router;
+    if (r && r.cfg && r.cfg.auto && typeof r.sync === 'function') r.sync().catch(() => {});
   }
   async consoleLogAsync(s, n = 300) {
     if (this.isDocker(s)) { const r = await this.dx(['logs', '--tail', String(n), this.cname(s)], { ok: true, timeout: 20000 }); return (r.stdout + r.stderr).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').split('\n').filter(Boolean); }
@@ -431,7 +456,9 @@ class GameServers {
     return { ok: true };
   }
 
-  info(s) { return { ...s, dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume hw-game-${s.id})` : this.dir(s), script: s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s), backups: !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s), links: guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')) }; }
+  info(s) { return { ...s, dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume hw-game-${s.id})` : this.dir(s), script: s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s), backups: !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s), links: guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')),
+    // „Von außen erreichbar“: geht ab Hostwerk 2.11 (Ports an Firewall/Router); router/auto für den passenden Hinweis
+    outside: { supported: !!(this.ctx.security && this.ctx.security.addPortProvider), router: !!this.ctx.router, auto: !!(this.ctx.router && this.ctx.router.cfg && this.ctx.router.cfg.auto) } }; }
   async infoLive(s) { const i = this.info(s); i.live = await this.live(s).catch(() => null); return i; }
   async dockerAvailable() { try { await this.ctx.docker.cli(); return true; } catch { return false; } }
   /** Docker there (CLI or Hostwerk's WSL engine), even if the engine is not running right now. */
@@ -453,7 +480,7 @@ class GameServers {
     r.get('/games/:id/players', async (req, res) => { const s = this.get(req.params.id); const live = await this.live(s); res.json({ live, players: live ? (await core('a2s').queryPlayers('127.0.0.1', live.queryPort, 1200).catch(() => null)) || [] : [] }); });
     r.post('/games/:id/send', async (req, res) => res.json(await this.send(this.get(req.params.id), (req.body || {}).command)));
     r.delete('/games/:id/backups/:file', (req, res) => { const s = this.get(req.params.id); const f = path.basename(req.params.file); if (!/\.tar\.gz$/.test(f)) throw new Error(T('Not a backup')); fs.rmSync(path.join(this.dir(s), 'backups', f), { force: true }); res.json({ ok: true }); });
-    r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string') s.name = b.name.slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); res.json(this.info(s)); });
+    r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string') s.name = b.name.slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate', 'public']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); if (typeof b.public === 'boolean') this.portsChanged(); res.json(this.info(s)); });
     r.delete('/games/:id', async (req, res) => { await this.remove(req.params.id, { files: req.query.files === '1' }); res.json({ ok: true }); });
     r.get('/games/:id/commands', async (req, res) => res.json(await this.commandsFor(this.get(req.params.id), { fresh: req.query.fresh === '1' })));
     r.get('/games/:id/console', async (req, res) => res.json({ lines: await this.consoleLogAsync(this.get(req.params.id), Number(req.query.n) || 300) }));
