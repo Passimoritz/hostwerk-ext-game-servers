@@ -467,4 +467,11 @@ export function GamesPage({ path = [] }) {
 
 export default {
   pages: { main: GamesPage },
+  // Seitenleiste: Punkt je Server (läuft/gestoppt), leere Liste = „noch keiner eingerichtet“ (Hostwerk zeigt dann einen gestrichelten Kreis)
+  nav: {
+    tip: (o) => {
+      const list = (o && Array.isArray(o.games)) ? o.games : [];
+      return { text: t('Game servers through LinuxGSM – natively on Linux, as Docker containers on Windows.'), lines: list.map((g) => ({ name: g.name, state: g.running ? 'running' : 'stopped', text: g.game || '' })) };
+    },
+  },
 };

@@ -238,5 +238,6 @@
   "Reachable from outside": "Von außen erreichbar",
   "Opens the ports in the firewall while the server runs. For the router too, install “Router & port forwarding”.": "Öffnet die Ports in der Firewall, solange der Server läuft. Für den Router zusätzlich „Router & Portfreigaben“ installieren.",
   "While the server runs, Hostwerk opens its ports in the firewall and the router – when it stops, they close again.": "Solange der Server läuft, öffnet Hostwerk seine Ports in der Firewall und im Router – stoppt er, schließen sie wieder.",
-  "Opens the ports in the firewall while the server runs. Turn on the automatic mode under Live → Router so the router follows too.": "Öffnet die Ports in der Firewall, solange der Server läuft. Damit der Router mitzieht, unter Livebetrieb → Router die Automatik einschalten."
+  "Opens the ports in the firewall while the server runs. Turn on the automatic mode under Live → Router so the router follows too.": "Öffnet die Ports in der Firewall, solange der Server läuft. Damit der Router mitzieht, unter Livebetrieb → Router die Automatik einschalten.",
+  "Game servers through LinuxGSM – natively on Linux, as Docker containers on Windows.": "Spiele-Server über LinuxGSM – nativ auf Linux, unter Windows als Docker-Container."
 }
