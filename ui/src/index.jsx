@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Gamepad2, FolderInput, Play, Download, Archive, Plus, Trash2, Settings2, TerminalSquare, Info, Monitor, ExternalLink, Wrench, FolderOpen, Users, LayoutDashboard, Network, BookOpen, Copy, CalendarClock, FileText, SlidersHorizontal, Boxes, RotateCcw } from 'lucide-react';
 import { post, del, useApi, useStore, waitJob, IS_LINUX, isElectron } from '@hostwerk/api';
 import { Btn, Tabs, Seg, Empty, Loading, Callout, StatusPill, Progress, toast, confirmDialog, InfoTip } from '@hostwerk/ui';
-import { serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart } from '@hostwerk/kit';
+import { serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart, useAreaTabs } from '@hostwerk/kit';
 import { FileBrowser } from '@hostwerk/files';
 import { t } from '@hostwerk/i18n';
 import { BASE, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable } from './common';
@@ -139,8 +139,14 @@ function GameCard({ s, installing, reload }) {
   );
 }
 
+// Reiter anderer Erweiterungen (Steckplatz games.tabs, Hostwerk 3.0+ mit SDK 3.2), z. B. der Spiele-Verbund – ältere Hostwerk haben
+// useAreaTabs nicht, dann bleibt es bei Servern und Import
+const NO_TABS = [];
+const useGameTabs = typeof useAreaTabs === 'function' ? () => useAreaTabs('games') : () => NO_TABS;
+
 export function GamesPage({ path = [], ext }) {
   const [id, tab] = path;
+  const areaTabs = useGameTabs();
   const d = useApi('/games', [], { live: false, poll: true });
   const [create, setCreate] = useState(false);
   const jobs = useStore((st) => st.jobs || {});
@@ -153,9 +159,10 @@ export function GamesPage({ path = [], ext }) {
   const { linux, docker, dockerInstalled, requirements } = d.data;
   const startDocker = async () => { try { const r = await post('/docker/start'); toast('Docker engine is starting …'); await waitJob(r.job); toast.success('Docker is running'); d.reload(); askDockerAutostart(); } catch (e) { toast.error(e.message); } };
   const importing = id === 'import';
-  const cur = id && !importing && servers.find((s) => s.id === id);
+  const xCur = areaTabs.find((x) => x.id === id) || null;
+  const cur = id && !importing && !xCur && servers.find((s) => s.id === id);
   if (cur) return <Server s={cur} tab={tab || 'overview'} reload={d.reload} />;
-  if (id && !importing) return <div className="page"><Empty icon={Gamepad2} title="Server not found"><a className="btn" href={BASE}>{t('To the overview')}</a></Empty></div>;
+  if (id && !importing && !xCur) return <div className="page"><Empty icon={Gamepad2} title="Server not found"><a className="btn" href={BASE}>{t('To the overview')}</a></Empty></div>;
   return (
     <div className="page fade-in">
       <div className="page-head">
@@ -166,7 +173,7 @@ export function GamesPage({ path = [], ext }) {
         </div>
       </div>
       <AddonTabs ext={ext}>
-      <Tabs value={importing ? 'import' : 'servers'} onChange={(v) => { location.hash = v === 'import' ? `${BASE.slice(1)}/import` : BASE.slice(1); }} tabs={[{ id: 'servers', label: t('Servers'), icon: Gamepad2, badge: servers.length }, { id: 'import', label: t('Import'), icon: FolderInput, title: t('Take over game servers that already exist on this PC') }]} />
+      <Tabs value={importing ? 'import' : xCur ? xCur.id : 'servers'} onChange={(v) => { location.hash = v === 'servers' ? BASE.slice(1) : `${BASE.slice(1)}/${v}`; }} tabs={[{ id: 'servers', label: t('Servers'), icon: Gamepad2, badge: servers.length }, { id: 'import', label: t('Import'), icon: FolderInput, title: t('Take over game servers that already exist on this PC') }, ...areaTabs.map(({ id: xid, label, icon }) => ({ id: xid, label, icon }))]} />
       {!linux && !docker && dockerInstalled && servers.some((s) => s.docker) && <Callout kind="warn" icon={Monitor} title="The Docker engine is not running right now" dismissible={false}>Servers in Docker containers need the engine. <Btn className="sm primary gs-ml" icon={Play} onClick={startDocker}>Start Docker</Btn></Callout>}
       {linux && requirements && (requirements.missing.length > 0 || requirements.root) && (
         <Callout kind="warn" title="Requirements" dismissible={false}>
@@ -174,7 +181,7 @@ export function GamesPage({ path = [], ext }) {
           {requirements.missing.length > 0 && <div className="small">{t('Missing programs:')} <b>{requirements.missing.join(', ')}</b>{requirements.installCmd && <><br />{t('Install ({distro}):', { distro: requirements.distro })}<pre className="tiny gs-mt">{requirements.installCmd}</pre></>}</div>}
         </Callout>
       )}
-      {importing ? <ImportTab onDone={d.reload} /> : servers.length === 0 ? (
+      {xCur ? xCur.render() : importing ? <ImportTab onDone={d.reload} /> : servers.length === 0 ? (
         <div className="stack">
           <QuickStart onMore={() => setCreate(true)} onDone={d.reload} />
           {!IS_LINUX && <InfoTip title="Two ways on Windows" icon={Monitor}>Steam server tools run right on this PC (most games have a Windows version). Games that only exist for Linux – and every LinuxGSM game – run in Hostwerk’s own Docker engine; the setup installs it for you when needed.</InfoTip>}

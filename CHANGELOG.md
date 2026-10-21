@@ -1,3 +1,7 @@
+## 1.8.0
+
+- Tabs of other extensions on the overview (slot “games.tabs”, Hostwerk 3.0+ with SDK 3.2) – e.g. “Network” from the game network; older Hostwerk versions simply show servers and import. / Reiter anderer Erweiterungen auf der Übersicht (Steckplatz „games.tabs“, Hostwerk 3.0+ mit SDK 3.2) – z. B. „Verbund“ vom Spiele-Verbund; ältere Hostwerk-Versionen zeigen einfach Server und Import.
+
 ## 1.7.0
 
 - New “Create game server” dialog in two clear steps: first pick the game (search on top, filters, big cards with the game's picture, popular games first), then set it up (name, free port, where the files go, right on this PC or in Docker, what happens). Explanations sit in one ⓘ instead of text blocks; no more tiny clustered buttons. / Neuer Dialog „Spiele-Server anlegen“ in zwei klaren Schritten: erst das Spiel wählen (Suche oben, Filter, große Karten mit Spielbild, beliebte Spiele zuerst), dann einrichten (Name, freier Port, Speicherort, direkt oder in Docker, was passiert). Erklärungen in einem ⓘ statt Textblöcken; keine gedrängten Mini-Knöpfe mehr.

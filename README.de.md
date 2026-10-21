@@ -10,6 +10,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 
 ## Was sie kann
 
+- Reiter anderer Erweiterungen auf der Übersicht (Steckplatz „games.tabs“, Hostwerk 3.0+ mit SDK 3.2) – z. B. „Verbund“ vom Spiele-Verbund; ältere Hostwerk-Versionen zeigen einfach Server und Import.
 - **Einrichtung in einem Schritt:** Spiel wählen → Docker (nur wenn nötig, wird mit eingerichtet) → installieren → starten, als eine Aufgabe mit nummerierten Schritten
 - **Zwei Wege:** Steam-Server-Tools über SteamCMD (direkt unter Windows und Linux, reine Linux-Tools in Docker) und alle Spiele aus der LinuxGSM-Liste
 - Die Steam-Liste bleibt klein: fertige Startzeilen für beliebte Spiele sind eingebaut; die komplette Liste der Steam-Server-Tools nur auf Wunsch, einmal als Datenstrom gelesen, gefiltert, gepackt, 7 Tage genutzt, seitenweise durchsucht

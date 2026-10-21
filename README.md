@@ -10,6 +10,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 
 ## What it does
 
+- Tabs of other extensions on the overview (slot “games.tabs”, Hostwerk 3.0+ with SDK 3.2) – e.g. “Network” from the game network; older Hostwerk versions simply show servers and import.
 - **One-step setup:** pick a game → Docker (only if needed, set up for you) → install → start, as one job with numbered steps
 - **Two ways:** Steam server tools through SteamCMD (natively on Windows and Linux, Linux-only tools in Docker) and every game from LinuxGSM’s list
 - Steam list stays small: ready-made start lines for popular games built in; the complete list of Steam server tools only on request, read once as a stream, filtered, gzipped, reused for 7 days, searched page by page
