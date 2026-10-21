@@ -9,6 +9,7 @@ const { backupSource, registerBackups } = require('./backupsource');
 
 exports.activate = (host) => {
   const games = host.provide('games', new GameServers(host));
+  games.art.routes(host.router); // /games/art before /games/:id
   games.routes(host.router);
   require('./extras').extras(games, host); // Meldungen (Absturz/Update, Discord), Spieler für andere Erweiterungen, Steam-Workshop
   // "Start with Hostwerk": native servers right away, Docker servers once the engine is ready (monitor tick)

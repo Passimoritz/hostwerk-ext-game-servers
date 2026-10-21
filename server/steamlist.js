@@ -119,10 +119,11 @@ class SteamAppList {
   }
 
   /**
-   * Search with paging. Ranking: ready-made profiles first, then names starting with the term, then the rest (A–Z).
+   * Search with paging. Ranking: popular games first (without a search term, in the given order), then ready-made
+   * profiles, then names starting with the term, then the rest (A–Z). `filter` narrows the list before paging.
    * Only the requested page leaves the server.
    */
-  search({ q = '', offset = 0, limit = 40 } = {}) {
+  search({ q = '', offset = 0, limit = 40, popular = [], filter = null } = {}) {
     const term = String(q || '').toLowerCase().trim().slice(0, 80);
     const words = term.split(/\s+/).filter(Boolean);
     offset = Math.max(0, Math.min(100000, Number(offset) || 0));
@@ -130,8 +131,10 @@ class SteamAppList {
     let list = this.all();
     if (/^\d{2,9}$/.test(term)) list = list.filter((x) => String(x.appid) === term || String(x.appid).startsWith(term) || x.name.toLowerCase().includes(term));
     else if (words.length) list = list.filter((x) => { const n = x.name.toLowerCase(); return words.every((w) => n.includes(w)); });
+    if (typeof filter === 'function') list = list.filter(filter);
+    const pop = (x) => { const i = popular.indexOf(x.appid); return i < 0 ? 1000 : i; };
     const rank = (x) => (x.profile ? 0 : 2) + (term && x.name.toLowerCase().startsWith(term) ? 0 : 1) + (x.login ? 2 : 0);
-    list = list.map((x) => [rank(x), x]).sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).map((x) => x[1]);
+    list = list.map((x) => [term ? 0 : pop(x), rank(x), x]).sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2].name.localeCompare(b[2].name)).map((x) => x[2]);
     return { total: list.length, offset, limit, items: list.slice(offset, offset + limit), list: this.state() };
   }
   /** One entry (or null). */

@@ -84,6 +84,20 @@ function steamcmdArgs(dir, appid, { validate = false, platform = null } = {}) {
   if (!Number.isInteger(id) || id < 1 || id > 99999999) throw new Error('Invalid Steam app id');
   return [...(platform ? ['+@sSteamCmdForcePlatformType', platform] : []), '+force_install_dir', dir, '+login', 'anonymous', '+app_update', String(id), ...(validate ? ['validate'] : []), '+quit'];
 }
+/**
+ * Own folder for a new server (instead of Hostwerk's): absolute, and either new or empty – Hostwerk never installs
+ * into a folder that holds something else.
+ */
+function ownFolder(dir, t = (x) => x) {
+  const raw = String(dir || '').trim();
+  if (!raw || raw.length > 400 || /\0/.test(raw) || !path.isAbsolute(raw) || raw.split(/[\\/]/).includes('..')) throw Object.assign(new Error(t('Choose the complete path of the folder.')), { status: 400 });
+  const full = path.resolve(raw);
+  if (fs.existsSync(full)) {
+    if (!fs.statSync(full).isDirectory()) throw Object.assign(new Error(t('There is a file with this name.')), { status: 400 });
+    if (fs.readdirSync(full).length) throw Object.assign(new Error(t('The folder is not empty – choose an empty or a new folder.')), { status: 400 });
+  } else if (!fs.existsSync(path.dirname(full))) throw Object.assign(new Error(t('The parent folder does not exist.')), { status: 400 });
+  return full;
+}
 /** Characters cmd.exe could interpret – a .bat start line may only contain plain values. */
 const BAT_SAFE = /^[\w.:=/\\@+,-]+$/;
 
@@ -110,21 +124,36 @@ class SteamServers {
   create(b, app) {
     const appid = Number(b.appid);
     if (!Number.isInteger(appid) || appid < 1 || appid > 99999999) throw Object.assign(new Error(this.T('Invalid Steam app id')), { status: 400 });
-    const plan = planFor(app || { appid, win: null, linux: null });
+    const plan = this.planWith(app || { appid, win: null, linux: null }, b.mode);
     if (!plan.ok) throw Object.assign(new Error(this.planText(plan)), { status: 400, reason: plan.reason });
     const p = G.profileFor(appid);
+    const port = Number(b.port);
+    const own = plan.mode === 'native' && b.dir ? ownFolder(b.dir, this.T.bind(this)) : null;
     const gameName = p ? p.name : String((app && app.name) || `Steam app ${appid}`).replace(/\s*(dedicated server|server|ds)$/i, '').slice(0, 60);
     const s = {
       id: `s${appid}-${crypto.randomBytes(2).toString('hex')}`, kind: 'steam', appid, game: `steam-${appid}`, gameName, gameAppId: (p && p.game) || (app && app.game) || null,
       name: this.gs.uniqueName(String(b.name || gameName).replace(/[\u0000-\u001f]/g, '').slice(0, 60) || gameName), createdAt: Date.now(),
       installed: false, autostart: false, monitor: true, autoUpdate: true, mode: plan.mode, platform: plan.platform,
-      port: (p && p.port) || 27015, maxPlayers: (p && p.maxPlayers) || 16, password: p && p.passwordMin ? crypto.randomBytes(4).toString('hex') : '',
+      port: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : (p && p.port) || 27015, maxPlayers: (p && p.maxPlayers) || 16, password: p && p.passwordMin ? crypto.randomBytes(4).toString('hex') : '',
       secret: crypto.randomBytes(8).toString('hex'), extraArgs: '', custom: p ? null : { exe: '', args: '' }, saves: p ? p.saves : null, backupKeep: 10,
     };
+    if (own) { fs.mkdirSync(own, { recursive: true }); s.externalDir = own; }
     s.ports = G.portsFor(s);
     this.gs.list().push(s);
     this.ctx.settings.save();
     return s;
+  }
+  /** Plan with the user's wish: on Windows a tool with a Linux build may also run in Docker ("docker"). */
+  planWith(app, wish) {
+    const plan = planFor(app);
+    if (wish === 'docker' && plan.ok && plan.mode === 'native' && this.canDocker(app)) return { ok: true, mode: 'docker', platform: 'linux', needsDocker: true, custom: plan.custom };
+    return plan;
+  }
+  /** Can this tool also run as a Linux build in Docker here (only offered on Windows, only with a known Linux build)? */
+  canDocker(app, platform = hostPlatform()) {
+    if (platform !== 'windows' || !app) return false;
+    const p = G.profileFor(app.appid);
+    return p ? !!p.linux : app.linux === true;
   }
   planText(plan) {
     return plan.reason === 'login' ? this.T('This server tool needs a Steam account that owns the game – Hostwerk only installs tools with anonymous login.')
@@ -538,4 +567,4 @@ class SteamServers {
   }
 }
 
-module.exports = { SteamServers, planFor, safeRel, safeRelPosix, parseSteamProgress, steamResult, steamcmdArgs, hostPlatform, DOCKER_IMAGE, STEAMCMD_URL, BAT_SAFE };
+module.exports = { SteamServers, ownFolder, planFor, safeRel, safeRelPosix, parseSteamProgress, steamResult, steamcmdArgs, hostPlatform, DOCKER_IMAGE, STEAMCMD_URL, BAT_SAFE };

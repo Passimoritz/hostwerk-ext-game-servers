@@ -20,6 +20,10 @@ const crypto = require('crypto');
 const { SteamServers, planFor, safeRel, hostPlatform } = require('./steam');
 const { SteamAppList } = require('./steamlist');
 const SG = require('./steamgames');
+const IM = require('./importer');
+const GI = require('./gameinfo');
+const { GameArt, gameNameOf } = require('./gameart');
+const { parseShellVars } = IM;
 
 // Hostwerk's building blocks – bound in the constructor (see server/index.js)
 let H = null;
@@ -84,15 +88,6 @@ function pickFor([name, appid, script], platform) {
 
 /* LinuxGSM settings that most games share – shown as a small form (the raw .cfg stays available). */
 const LGSM_KEYS = ['servername', 'port', 'queryport', 'maxplayers', 'serverpassword', 'startparameters'];
-/** key="value" lines of a LinuxGSM .cfg (it is sourced by bash – read only literal assignments). */
-function parseShellVars(text) {
-  const out = {};
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const m = line.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s#]*))/);
-    if (m) out[m[1]] = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4];
-  }
-  return out;
-}
 /** Set values in a LinuxGSM .cfg – values that bash could interpret ($, `, ", \, line breaks) are refused. */
 function setShellVars(content, updates) {
   let text = String(content || '');
@@ -123,6 +118,9 @@ class GameServers {
     this.root = path.join(this.ctx.paths.base, 'spiele');
     this.steam = new SteamServers(this, host);
     this.apps = new SteamAppList({ dataDir: this.dataDir });
+    // Game pictures: found once per game, kept in Hostwerk's image cache (works offline afterwards)
+    this.art = new GameArt({ dataDir: this.dataDir, imageCache: this.ctx.imageCache, offline: () => { try { return core('download').isOffline() === true; } catch { return false; } } });
+    this.lastScan = new Map(); // last import search: key → found server (with the details that stay on the server)
     this.seen = new Set();
     this.timers = [];
     if (!process.env.HW_TEST) {
@@ -142,7 +140,8 @@ class GameServers {
   get cfg() { const s = this.ctx.settings.get(); if (!s.games) s.games = { servers: [] }; return s.games; }
   list() { return this.cfg.servers; }
   get(id) { const s = this.list().find((x) => x.id === id); if (!s) throw Object.assign(new Error(T('Game server not found')), { status: 404 }); return s; }
-  dir(s) { return path.join(this.root, s.id); }
+  /** Server folder: Hostwerk's own (<base>/spiele/<id>) or – imported in place – the folder where it always was. */
+  dir(s) { return s.externalDir || path.join(this.root, s.id); }
   script(s) { return path.join(this.dir(s), s.game); }
   /** Docker mode (Windows/everywhere): official LinuxGSM image, one container per server, data in the volume. */
   isDocker(s) { return s.mode === 'docker'; }
@@ -150,7 +149,10 @@ class GameServers {
   get dataDir() { return path.join(this.ctx.paths.data || path.join(this.ctx.paths.base, 'data'), 'game-servers'); }
   /** SteamCMD method (1.3) – everything else is LinuxGSM. */
   isSteam(s) { return !!s && s.kind === 'steam'; }
-  cname(s) { return `hostwerk-game-${s.id}`; }
+  /** Container name – an imported container keeps its own name. */
+  cname(s) { return s.container || `hostwerk-game-${s.id}`; }
+  /** Volume (or bind folder) with /data of a LinuxGSM container – an imported container keeps its own. */
+  lgsmVolume(s) { return s.volume || `hw-game-${s.id}`; }
   /** Get Docker ready: set up but off → start the engine; not there at all → error with a code (the interface offers the install). */
   async dockerReady() {
     if (!this.ctx.docker) throw new Error(T('Docker is missing.'));
@@ -272,7 +274,7 @@ class GameServers {
   lgsmCreateArgs(s) {
     const image = `gameservermanagers/gameserver:${s.game.replace(/server$/, '')}`;
     const pub = (s.ports || []).flatMap((p) => (/tcp/i.test(p.proto) && /udp/i.test(p.proto) ? ['tcp', 'udp'] : [String(p.proto || 'tcp').toLowerCase()]).flatMap((pr) => ['-p', `${p.port}:${p.port}/${pr}`]));
-    return ['create', '--name', this.cname(s), '--restart', 'no', '-v', `hw-game-${s.id}:/data`, '-e', 'UPDATE_ON_START=1', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, ...this.steam.limitArgs(s.limits), image];
+    return ['create', '--name', this.cname(s), '--restart', 'no', '-v', `${this.lgsmVolume(s)}:/data`, '-e', 'UPDATE_ON_START=1', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, ...this.steam.limitArgs(s.limits), image];
   }
   lgsmSpecHash(s) { return crypto.createHash('sha1').update(JSON.stringify(this.lgsmCreateArgs(s))).digest('hex').slice(0, 16); }
   /** Ports or limits changed → create the container anew (data stays in the volume). Older containers without a hash are kept. */
@@ -311,7 +313,7 @@ class GameServers {
     let s;
     if (method === 'steam') {
       const app = this.apps.find(b.appid) || { appid: Number(b.appid), win: null, linux: null };
-      const plan = planFor(app);
+      const plan = this.steam.planWith(app, b.mode);
       if (!plan.ok) throw Object.assign(new Error(this.steam.planText(plan)), { status: 400 });
       needsDocker = plan.needsDocker;
       if (needsDocker && !b.installDocker && !(await this.dockerInstalled())) throw dockerMissing(b.name || app.name);
@@ -633,11 +635,12 @@ class GameServers {
   async remove(id, { files = false } = {}) {
     const s = this.get(id);
     if (this.isSteam(s)) await this.steam.remove(s, { files });
-    else if (this.isDocker(s)) { await this.dx(['rm', '-f', this.cname(s)], { ok: true }); if (files) await this.dx(['volume', 'rm', `hw-game-${s.id}`], { ok: true }); }
+    else if (this.isDocker(s)) { await this.dx(['rm', '-f', this.cname(s)], { ok: true }); if (files && !/[\\/]/.test(this.lgsmVolume(s))) await this.dx(['volume', 'rm', this.lgsmVolume(s)], { ok: true }); }
     else if (IS_LINUX && (await this.running(s))) await this.run(id, 'stop').promise.catch(() => {});
     this.cfg.servers = this.list().filter((x) => x.id !== id);
     this.ctx.settings.save();
-    if (files) fs.rmSync(this.dir(s), { recursive: true, force: true });
+    // An imported folder (in place) was there before Hostwerk – it stays; only Hostwerk's own folders are deleted
+    if (files && !s.externalDir) fs.rmSync(this.dir(s), { recursive: true, force: true });
   }
   /*
    * Monitor: natively through LinuxGSM "monitor"; in Docker mode Hostwerk restarts a crashed container – but only if it
@@ -738,7 +741,7 @@ class GameServers {
   info(s) {
     const steam = this.isSteam(s);
     const { secret, password, pid, ...pub } = s; // secrets only where the interface needs them (steam.adminPassword / password field)
-    return { ...pub, password: steam ? s.password || '' : undefined, method: steam ? 'steam' : 'lgsm', dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume hw-game-${s.id})` : this.dir(s), script: steam ? null : s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s),
+    return { ...pub, password: steam ? s.password || '' : undefined, method: steam ? 'steam' : 'lgsm', dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume ${this.lgsmVolume(s)})` : this.dir(s), external: !!s.externalDir, script: steam ? null : s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s),
       backups: steam ? this.steam.backups(s).length : !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s),
       links: steam ? steamLinks(s) : guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: steam ? this.steam.canSend(s) : !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')),
       steam: steam ? this.steam.info(s) : null, limits: s.limits || null,
@@ -764,6 +767,168 @@ class GameServers {
   /** Docker there (CLI or Hostwerk's WSL engine), even if the engine is not running right now. */
   async dockerInstalled() { try { const st = await this.ctx.docker.status(); return !!(st.cli || st.wslAvailable); } catch { return false; } }
 
+  /* ---------- picking a game: pictures, popular first, memory hint, free port ---------- */
+  /** What the picture of a server is looked up by (Steam app of the game, server tool, LinuxGSM short name, name). */
+  artQuery(s, shape = 'square') {
+    return this.isSteam(s) ? { appid: s.appid, game: s.gameAppId, name: s.gameName || s.name, shape } : { short: s.short || String(s.game || '').replace(/server$/, ''), name: s.gameName || FAVORITES[s.game] || s.game, shape };
+  }
+  /** Picture addresses for Hostwerk's own icon search (services/icons.js): the one that worked, else the first guesses. */
+  iconSources(id) { try { return this.art.known(this.artQuery(this.get(id))).map((url) => ({ url })); } catch { return []; } }
+  /** Ports in use by the game servers of this list (all protocols). */
+  usedPorts(exceptId = null) {
+    const out = new Set();
+    for (const s of this.list()) if (s.id !== exceptId) for (const p of this.portsOf(s)) if (Number(p.port)) out.add(Number(p.port));
+    return out;
+  }
+  /** Free main port for a Steam profile (from its default or the wished one): no other game server, no program on it. */
+  async suggestPort({ appid, port } = {}) {
+    const p = SG.profileFor(appid);
+    const base = Number(port) >= 1024 && Number(port) <= 65535 ? Number(port) : p ? p.port : null;
+    if (!base) return { port: null };
+    const offsets = GI.portOffsets(appid, base);
+    const r = await GI.suggestPort({ base, offsets, used: this.usedPorts(), isFree: process.env.HW_TEST ? async () => true : GI.portFree });
+    return { ...r, base, offsets, ports: SG.portsFor({ appid: Number(appid), port: r.port }) };
+  }
+
+  /* ---------- import: game servers that already exist on this PC ---------- */
+  /** Folders Hostwerk manages already – left out of the search. */
+  managedDirs() { return [this.root, path.join(this.dataDir, 'steamcmd'), ...this.list().filter((s) => !this.isDocker(s)).map((s) => this.dir(s))]; }
+  /**
+   * Search (read only): Steam libraries, SteamCMD folders, LinuxGSM instances, Docker containers of game server images
+   * and optionally one folder. Details the interface does not need (passwords, start lines) stay here (lastScan).
+   */
+  async scanImport({ folder = null } = {}) {
+    let dir = null;
+    if (folder) {
+      dir = path.resolve(String(folder).trim());
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw Object.assign(new Error(T('This folder does not exist.')), { status: 400 });
+    }
+    const { items, places } = await IM.scanPlaces({ folder: dir, exec: (c, a, o) => core('util').exec(c, a, o), managed: this.managedDirs(), ...(this.scanRoots ? { roots: this.scanRoots } : {}) });
+    const platform = hostPlatform();
+    const found = items.map((it) => this.importItem(it, platform)).filter(Boolean);
+    const docker = await this.scanDocker().catch(() => ({ items: [], available: false }));
+    found.push(...docker.items);
+    this.lastScan = new Map(found.map((x) => [x.key, x]));
+    return { items: found.map(publicItem), places, docker: docker.available, folder: dir, scannedAt: Date.now(), linux: IS_LINUX };
+  }
+  /** Found folder → entry for the interface (+ hidden details for the import itself). */
+  importItem(it, platform) {
+    const key = crypto.createHash('sha1').update(`${it.appid || it.script}|${path.resolve(it.dir)}`).digest('hex').slice(0, 12);
+    if (it.script) {
+      const v = it.values || {};
+      const reason = IS_LINUX ? null : 'linux';
+      return { key, kind: 'lgsm', source: it.source, script: it.script, short: it.script.replace(/server$/, ''), name: FAVORITES[it.script] || it.script, dir: it.dir, installed: it.installed,
+        values: { port: v.port || null, name: v.name || null, maxPlayers: v.maxPlayers || null, hasPassword: !!v.password }, canInPlace: !reason, canCopy: !reason, reason, ram: GI.ramHint({ game: it.script }) };
+    }
+    const p = SG.profileFor(it.appid);
+    const exe = it.exe || (p ? (platform === 'linux' ? p.linux : p.win) : null);
+    const start = IM.startScript(it.dir, { exe });
+    // Runs here? The files are there already – so a tool that needs a Steam login counts (only updates would need it)
+    const plan = planFor({ appid: it.appid, win: p ? !!p.win : null, linux: p ? !!p.linux : null }, platform);
+    const native = plan.ok && plan.mode === 'native';
+    const v = (start && start.values) || {};
+    const updates = it.login ? 'login' : it.client ? 'client' : it.manifestInside ? 'steamcmd' : 'manual';
+    return { key, kind: 'steam', source: it.source, appid: it.appid, game: it.game || null, name: p ? p.name : gameNameOf(it.name) || it.name, tool: it.name, dir: it.dir, size: it.size || null, profile: !!p,
+      start: start ? { script: start.script, exe: start.exe, line: start.args !== null && !!start.exe } : null,
+      values: { port: v.port || null, name: v.name || null, maxPlayers: v.maxPlayers || null, hasPassword: !!v.password }, updates,
+      canInPlace: native, canCopy: native, reason: native ? null : plan.reason === 'windows-only' ? 'windows-only' : 'system', ram: GI.ramHint({ appid: it.appid }),
+      _start: start, _exe: exe };
+  }
+  /** Docker containers of game server images (only when the engine runs – it is never started for this). */
+  async scanDocker() {
+    if (!(await this.dockerAvailable())) return { items: [], available: false };
+    const r = await this.dx(['ps', '-a', '--no-trunc', '--format', '{{json .}}'], { ok: true, timeout: 20000 });
+    if (r.code !== 0) return { items: [], available: false };
+    const mine = new Set(this.list().filter((s) => this.isDocker(s)).map((s) => this.cname(s)));
+    const rows = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+      .filter((c) => IM.dockerGameImage(c.Image) && !mine.has(String(c.Names || '').split(',')[0]));
+    if (!rows.length) return { items: [], available: true };
+    const ins = await this.dx(['inspect', ...rows.map((c) => c.ID)], { ok: true, timeout: 30000 });
+    let det = []; try { det = JSON.parse(ins.stdout || '[]'); } catch { /* none */ }
+    return { available: true, items: rows.map((c) => IM.dockerItem(c, det.find((d) => String(d.Id || '').startsWith(String(c.ID))) || null)).filter(Boolean) };
+  }
+  /**
+   * Take over a found server – in place (nothing moves; the folder or container stays where it is) or as a copy into
+   * Hostwerk's folder (job with progress; the original stays untouched). Nothing is changed before this call.
+   */
+  async adopt(b = {}) {
+    const key = String(b.key || '');
+    let it = this.lastScan.get(key);
+    if (!it) { await this.scanImport({ folder: b.folder || null }); it = this.lastScan.get(key); }
+    if (!it) throw Object.assign(new Error(T('This server is not there any more – search again.')), { status: 404 });
+    const mode = b.mode === 'copy' ? 'copy' : 'inplace';
+    if (mode === 'copy' ? !it.canCopy : !it.canInPlace) throw Object.assign(new Error(importReason(it)), { status: 400 });
+    if (it.dir && this.list().some((s) => !this.isDocker(s) && IM.same(this.dir(s), it.dir))) throw Object.assign(new Error(T('Hostwerk manages this folder already.')), { status: 409 });
+    const name = this.uniqueName(String(b.name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) || String(it.values && it.values.name || it.name).slice(0, 60));
+    const hex = crypto.randomBytes(2).toString('hex');
+    let s;
+    if (it.kind === 'steam') s = this.steamFromImport(it, name, `s${it.appid}-${hex}`, mode);
+    else if (it.kind === 'lgsm') s = { id: `${it.short}-${hex}`, game: it.script, name, createdAt: Date.now(), installed: !!it.installed, autostart: false, monitor: true };
+    else s = { id: `${it.short}-${hex}`, game: it.script, name, createdAt: Date.now(), installed: true, autostart: false, monitor: true, mode: 'docker', container: it.container, volume: it.volume, ports: it.ports || [], portsCustom: true, wantRun: !!it.running };
+    s.imported = { from: it.source, mode, at: Date.now(), dir: it.dir || null, container: it.container || null };
+    if (mode === 'inplace' && it.kind !== 'docker') s.externalDir = path.resolve(it.dir);
+    if (mode === 'copy') s.installed = false;
+    if (it.kind !== 'steam') this.rememberGameName(s);
+    this.list().push(s);
+    this.ctx.settings.save();
+    this.lastScan.delete(key);
+    this.broadcast({ type: 'games' });
+    if (mode === 'copy') return { id: s.id, job: this.copyJob(s, it.dir).id };
+    await this.refresh(s).catch(() => {});
+    return { id: s.id };
+  }
+  /** Steam server entry from a found folder – starts exactly as before (start line of its script) where one was found. */
+  steamFromImport(it, name, id, mode) {
+    const p = SG.profileFor(it.appid);
+    const st = it._start || null;
+    const v = (st && st.values) || {};
+    const s = {
+      id, kind: 'steam', appid: it.appid, game: `steam-${it.appid}`, gameName: it.name, gameAppId: it.game || (p && p.game) || null, name, createdAt: Date.now(),
+      installed: true, installedAt: Date.now(), autostart: false, monitor: true, mode: 'native', platform: hostPlatform(),
+      // Updates through Hostwerk's SteamCMD only where that does not fight the Steam client or reload everything
+      autoUpdate: it.updates === 'steamcmd' || (mode === 'copy' && it.updates !== 'login'),
+      port: v.port || (p && p.port) || 27015, maxPlayers: v.maxPlayers || (p && p.maxPlayers) || 16,
+      password: v.password && /^[^\s"'`$\\]{1,40}$/.test(v.password) ? v.password : '',
+      secret: crypto.randomBytes(8).toString('hex'), extraArgs: '', custom: null, saves: null, backupKeep: 10,
+    };
+    if (st && st.exe && st.args !== null) s.custom = { exe: st.exe, args: st.args };
+    else if (!p) s.custom = { exe: (st && st.exe) || '', args: '' };
+    const savedir = st && st.args ? (st.args.match(/-savedir\s+"?([^"\s]+)/i) || [])[1] : null;
+    for (const c of [savedir, p && p.saves]) {
+      if (!c) continue;
+      try { if (fs.existsSync(safeRel(it.dir, c))) { s.saves = c; break; } } catch { /* outside → not used */ }
+    }
+    s.ports = SG.portsFor(s);
+    return s;
+  }
+  /** Copy a found folder into Hostwerk's folder (job). If it fails, the half copy and the entry go again – the original stays. */
+  copyJob(s, src) {
+    const { fmtBytes } = core('download');
+    return core('jobs').runJob(T('Copy “{name}” into Hostwerk', { name: s.name }), async (job) => {
+      const dest = path.join(this.root, s.id);
+      try {
+        job.progress(2, T('Measuring the folder …'));
+        const size = await IM.folderSize(src);
+        fs.mkdirSync(this.root, { recursive: true });
+        const free = IM.freeSpace(this.root);
+        if (free !== null && free < size.bytes * 1.05 + 100 * 1048576) throw new Error(T('Not enough free space: {need} needed, {free} free.', { need: fmtBytes(size.bytes), free: fmtBytes(free) }));
+        let stop = false;
+        if (typeof job.onCancel === 'function') job.onCancel(() => { stop = true; });
+        await IM.copyTree(src, dest, { total: size.bytes, cancelled: () => stop, onProgress: (d, t) => job.progress(5 + 90 * (t ? Math.min(1, d / t) : 1), T('Copying … {done} of {total}', { done: fmtBytes(d), total: fmtBytes(t) })) });
+        s.installed = true;
+        this.ctx.settings.save();
+        this.broadcast({ type: 'games' });
+        return { id: s.id, bytes: size.bytes };
+      } catch (e) {
+        fs.rmSync(dest, { recursive: true, force: true });
+        this.cfg.servers = this.list().filter((x) => x.id !== s.id);
+        this.ctx.settings.save();
+        this.broadcast({ type: 'games' });
+        throw e;
+      }
+    }, { key: 'game-create-' + s.id });
+  }
+
   /** Short list for Hostwerk's overview (dashboard, phone). */
   summary() { return this.list().map((g) => ({ id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm' })); }
 
@@ -774,15 +939,25 @@ class GameServers {
       for (const s of this.list()) if (!s.gameName) this.rememberGameName(s);
       res.json({ linux: IS_LINUX, docker, dockerInstalled, servers: await Promise.all(this.list().map((s) => this.infoLive(s))), requirements: await this.requirements().catch(() => null) });
     });
-    r.get('/games/catalog', async (req, res) => res.json({ games: await this.games(), favorites: FAVORITES }));
+    r.get('/games/catalog', async (req, res) => {
+      const games = (await this.games()).map((g) => ({ ...g, popular: GI.popularRank(GI.POPULAR_LGSM, g.game), ram: GI.ramHint({ game: g.game }) }));
+      res.json({ games, favorites: FAVORITES, linux: IS_LINUX });
+    });
     r.get('/games/quick-picks', async (req, res) => res.json(await this.quickPicks()));
     // Steam server tools: one page per request, searched here (the list itself stays on the server)
     r.get('/games/steam/apps', (req, res) => {
-      const out = this.apps.search({ q: req.query.q, offset: req.query.offset, limit: req.query.limit });
       const platform = hostPlatform();
-      out.items = out.items.map((x) => { const plan = planFor(x, platform); return { ...x, plan: plan.ok ? { mode: plan.mode, needsDocker: plan.needsDocker, custom: plan.custom } : { reason: plan.reason } }; });
+      // Filters: ready = ready-made start, native = runs on this PC without Docker
+      const f = String(req.query.filter || '');
+      const filter = f === 'ready' ? (x) => x.profile : f === 'native' ? (x) => { const pl = planFor(x, platform); return pl.ok && !pl.needsDocker; } : null;
+      const out = this.apps.search({ q: req.query.q, offset: req.query.offset, limit: req.query.limit, popular: GI.POPULAR_STEAM, filter });
+      out.items = out.items.map((x) => { const plan = planFor(x, platform); return { ...x, popular: GI.popularRank(GI.POPULAR_STEAM, x.appid) !== null, ram: GI.ramHint({ appid: x.appid }), plan: plan.ok ? { mode: plan.mode, needsDocker: plan.needsDocker, custom: plan.custom, docker: this.steam.canDocker(x, platform) } : { reason: plan.reason } }; });
       res.json(out);
     });
+    r.get('/games/ports/suggest', async (req, res) => res.json(await this.suggestPort({ appid: req.query.appid, port: req.query.port })));
+    r.get('/games/import/scan', async (req, res) => res.json(await this.scanImport()));
+    r.post('/games/import/scan', async (req, res) => res.json(await this.scanImport({ folder: (req.body || {}).folder || null })));
+    r.post('/games/import', async (req, res) => res.json(await this.adopt(req.body || {})));
     r.post('/games/steam/apps/refresh', async (req, res) => { await this.apps.refresh({ force: !!(req.body || {}).force }); res.json(this.apps.state()); });
     r.post('/games', async (req, res) => res.json(await this.setup(req.body || {})));
     r.get('/games/:id', async (req, res) => { const s = this.get(req.params.id); if (this.isDocker(s) && !(await this.dockerAvailable())) s.running = false; else if (this.isSteam(s) || IS_LINUX || this.isDocker(s)) await this.refresh(s).catch(() => {}); res.json(await this.infoLive(s)); });
@@ -835,4 +1010,15 @@ function parseDetails(raw) {
   return { text, ports, info };
 }
 
-module.exports = { GameServers, COMMANDS, FAVORITES, IS_LINUX, PICKS, pickFor, parseCommands, parseDetails, guideLinks, steamLinks, parseShellVars, setShellVars, cleanLimits, LGSM_KEYS };
+/** Found server for the interface: without the details that stay on the server (start line, password). */
+function publicItem(it) { return Object.fromEntries(Object.entries(it).filter(([k]) => !k.startsWith('_'))); }
+/** Why a found server can not be taken over (this way). */
+function importReason(it) {
+  if (it.reason === 'linux') return T('LinuxGSM servers can only be taken over on Linux.');
+  if (it.reason === 'windows-only') return T('This server tool only exists for Windows.');
+  if (it.reason === 'docker-other') return T('This container does not come from LinuxGSM – manage it on the Docker page.');
+  if (it.reason === 'no-volume') return T('The container keeps its data inside itself (no volume) – Hostwerk could not create it anew without losing them.');
+  return T('This server tool does not run on this system.');
+}
+
+module.exports = { GameServers, publicItem, importReason, COMMANDS, FAVORITES, IS_LINUX, PICKS, pickFor, parseCommands, parseDetails, guideLinks, steamLinks, parseShellVars, setShellVars, cleanLimits, LGSM_KEYS };
