@@ -1,3 +1,8 @@
+## 1.4.0
+
+- Docker servers (LinuxGSM) register with Hostwerk's security updates: when Docker Hub has a newer image (Ubuntu, libraries, LinuxGSM), it is pulled, the container is made again (data stays in the volume) and a running server has to keep running – otherwise the previous image comes back. / Docker-Server (LinuxGSM) melden sich bei Hostwerks Sicherheits-Updates an: Gibt es auf Docker Hub ein neueres Image (Ubuntu, Bibliotheken, LinuxGSM), wird es geladen, der Container neu angelegt (Daten bleiben im Volume) und ein laufender Server muss weiterlaufen – sonst kommt das vorige Image zurück.
+- Windows: Steam servers start without their own console window. / Windows: Steam-Server starten ohne eigenes Konsolenfenster.
+
 ## 1.3.0
 
 - One-step setup: with no server yet, pick a game and click "Set up" – Hostwerk sets up Docker if that way needs it (its own engine, no Docker Desktop), installs the server and starts it, as one job with numbered steps. / Einrichtung in einem Schritt: Ohne Server einfach ein Spiel wählen und „Einrichten“ klicken – Hostwerk richtet Docker ein, falls dieser Weg es braucht (eigene Engine, ohne Docker Desktop), installiert den Server und startet ihn, als eine Aufgabe mit nummerierten Schritten.

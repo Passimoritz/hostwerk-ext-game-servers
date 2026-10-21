@@ -16,6 +16,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 - Console, send commands, player list, map and version through the Steam query (A2S)
 - Every LinuxGSM command – including the game-specific ones the script offers (e.g. wipe for Rust)
 - Updates (automatic when nobody plays), backups, monitor with restart after a crash
+- Security updates for the Docker image of LinuxGSM servers through Hostwerk's security updates – with a trial and the previous image as fallback (Hostwerk 2.11 or newer)
 - Ports and addresses, forwarding through the “Router & port forwarding” extension
 - Start with Hostwerk, settings editor (lgsm config) and file browser
 - Settings per server: name, ports, max players, password, start line, config files, update on start, restart after a crash, CPU/RAM limits for containers, scheduled restarts/backups (through Hostwerk’s tasks)

@@ -488,6 +488,7 @@
   "The server does not answer on the RCON port (still starting?).": "Der Server antwortet nicht auf dem RCON-Port (startet er noch?).",
   "RCON: the server does not accept console commands right now (still starting?)": "RCON: Der Server nimmt gerade keine Konsolenbefehle an (startet er noch?)",
   "Invalid RCON port": "Ungültiger RCON-Port",
+  "{name} does not keep running with the new image.": "{name} läuft mit dem neuen Image nicht weiter.",
   "$patterns": [
     [
       "Invalid port “{}” – write e.g. 2456/udp.",
