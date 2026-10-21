@@ -1,15 +1,38 @@
 import { toast } from '@hostwerk/ui';
-import { SvcImage, Logo } from '@hostwerk/kit';
+import { SvcImage, LazyImg } from '@hostwerk/kit';
+import { apiUrl } from '@hostwerk/api';
 import { t } from '@hostwerk/i18n';
 
 /* Game servers – shared helpers of the interface (paths, labels, game logos). */
 
 export const BASE = '#/ext/game-servers';
 export const isSteam = (s) => s.method === 'steam' || s.kind === 'steam';
-/** Game logo: LinuxGSM icon or Steam capsule – loaded once visible; without internet a monogram stays. */
+/** Initials on a colour from the name – the fallback for a missing picture (never an empty grey box). */
+export function Monogram({ name, className = '', style }) {
+  const words = String(name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  const letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
+  let h = 0; for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return <span className={`gs-mono ${className}`} style={{ ...style, '--h': h }} aria-hidden="true">{letters}</span>;
+}
+/**
+ * Picture of a game: Hostwerk looks it up once by the game (Steam art of the game – not of the server tool, which has
+ * none –, the store search by name, the LinuxGSM icon), keeps it in its image cache and serves it from there, also
+ * offline. shape: 'wide' (cards, Steam header) or 'square' (icons). Until it is there a shimmer, without one initials.
+ */
+export function GameArt({ appid, game, short, name, shape = 'wide', className = '', size }) {
+  const q = new URLSearchParams();
+  if (appid) q.set('appid', String(appid));
+  if (game) q.set('game', String(game));
+  if (short) q.set('short', String(short));
+  if (name) q.set('name', String(name));
+  q.set('shape', shape);
+  const style = size ? { width: size, height: size } : undefined;
+  const cls = `gs-art ${shape} ${className}`;
+  return <LazyImg src={apiUrl(`/api/games/art?${q}`)} className={cls} style={style} fit="cover" fallback={<Monogram name={name || short} className={cls} style={style} />} />;
+}
+/** Square game picture for icons (server list, quick start). appid = Steam app of the GAME. */
 export function GameLogo({ short, appid, size = 28, name }) {
-  const src = appid ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${Number(appid)}/capsule_sm_120.jpg` : short ? `https://raw.githubusercontent.com/GameServerManagers/LinuxGSM/master/lgsm/data/gameicons/${short}-icon.png` : null;
-  return <Logo src={src} name={name || short} className="game-logo" size={size} />;
+  return <GameArt short={short} game={appid} name={name || short} shape="square" className="game-logo" size={size} />;
 }
 export const shortOf = (s) => (isSteam(s) ? null : s.short || String(s.game || '').replace(/server$/, ''));
 export const GameIcon = ({ s, size = 30, className = 'svc-icon' }) => <SvcImage kind="game" id={s.id} name={s.name} className={className} size={size} fallback={<GameLogo short={shortOf(s)} appid={isSteam(s) ? s.gameAppId : null} size={size} name={s.gameName || s.name} />} />;

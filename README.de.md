@@ -13,6 +13,9 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 - **Einrichtung in einem Schritt:** Spiel wählen → Docker (nur wenn nötig, wird mit eingerichtet) → installieren → starten, als eine Aufgabe mit nummerierten Schritten
 - **Zwei Wege:** Steam-Server-Tools über SteamCMD (direkt unter Windows und Linux, reine Linux-Tools in Docker) und alle Spiele aus der LinuxGSM-Liste
 - Die Steam-Liste bleibt klein: fertige Startzeilen für beliebte Spiele sind eingebaut; die komplette Liste der Steam-Server-Tools nur auf Wunsch, einmal als Datenstrom gelesen, gefiltert, gepackt, 7 Tage genutzt, seitenweise durchsucht
+- **Spiel wählen in zwei Schritten:** Suche, Filter (fertiger Start, ohne Docker, beliebt) und große Karten mit Spielbild – danach Name, freier Port, Speicherort und direkt/Docker; Arbeitsspeicher-Hinweis je beliebtem Spiel
+- **Spielbilder ohne Wartung:** über das Spiel gesucht (Steam-CDN, Shop-Suche, LinuxGSM-Symbol), einmal geholt und in Hostwerks Bild-Cache gehalten, auch offline; ohne Bild Anfangsbuchstaben
+- **Import vorhandener Server:** Steam-Bibliotheken, SteamCMD-Ordner, LinuxGSM-Instanzen (Linux), LinuxGSM-Docker-Container und ein Ordner deiner Wahl – am bisherigen Ort oder als Kopie übernehmen, mit Port, Spielerzahl und Startzeile; die Suche liest nur
 - Konsole, Befehle senden, Spielerliste, Karte und Version per Steam-Abfrage (A2S)
 - Alle LinuxGSM-Befehle – auch die spielspezifischen, die das Skript anbietet (z. B. wipe bei Rust)
 - Updates (automatisch, wenn niemand spielt), Backups, Überwachen mit Neustart nach Absturz
@@ -36,7 +39,7 @@ Native Erweiterungen laufen als Teil von Hostwerk (eigener Server- und Oberfläc
 
 ## Daten
 
-`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>`, SteamCMD und die zwischengespeicherte Steam-Liste in `<Hostwerk>/data/game-servers` – genau dort, wo Hostwerk sie schon immer abgelegt hat. Entfernen der Erweiterung löscht nichts.
+`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>`, SteamCMD, die zwischengespeicherte Steam-Liste und die gemerkten Spielbild-Adressen (`art.json`) in `<Hostwerk>/data/game-servers`; übernommene Server bleiben in ihrem Ordner bzw. Container – genau dort, wo Hostwerk sie schon immer abgelegt hat. Entfernen der Erweiterung löscht nichts.
 
 ## Entwickeln
 

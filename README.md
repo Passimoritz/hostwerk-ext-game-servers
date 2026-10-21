@@ -13,6 +13,9 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 - **One-step setup:** pick a game → Docker (only if needed, set up for you) → install → start, as one job with numbered steps
 - **Two ways:** Steam server tools through SteamCMD (natively on Windows and Linux, Linux-only tools in Docker) and every game from LinuxGSM’s list
 - Steam list stays small: ready-made start lines for popular games built in; the complete list of Steam server tools only on request, read once as a stream, filtered, gzipped, reused for 7 days, searched page by page
+- **Picking a game in two steps:** search, filters (ready-made start, without Docker, popular) and big cards with the game's picture – then name, a free port, where the files go and native/Docker; memory hint for popular games
+- **Game pictures without upkeep:** looked up by the game (Steam CDN, store search, LinuxGSM icon), fetched once and kept in Hostwerk's image cache, also offline; initials when there is none
+- **Import existing servers:** Steam libraries, SteamCMD folders, LinuxGSM instances (Linux), LinuxGSM Docker containers and a folder of your choice – take them over where they are or as a copy, with port, players and start line; searching only reads
 - Console, send commands, player list, map and version through the Steam query (A2S)
 - Every LinuxGSM command – including the game-specific ones the script offers (e.g. wipe for Rust)
 - Updates (automatic when nobody plays), backups, monitor with restart after a crash
@@ -36,7 +39,7 @@ Native extensions run as part of Hostwerk (own server and interface part). That 
 
 ## Data
 
-`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>`, SteamCMD and the cached Steam list in `<Hostwerk>/data/game-servers` – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
+`settings.games, <Hostwerk>/spiele/<server>, Docker volumes hw-game-<server>`, SteamCMD, the cached Steam list and the remembered picture addresses (`art.json`) in `<Hostwerk>/data/game-servers`; servers taken over stay in their folder or container – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
 
 ## Develop
 

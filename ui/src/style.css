@@ -1,18 +1,61 @@
 /* Game servers – only Hostwerk's design tokens (font sizes, radii, spacing, colours), so light/dark and future changes fit */
 
-/* Picking a game with logos */
-.game-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: var(--sp-2); }
-.game-tile { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); padding: var(--sp-3) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; min-width: 0; transition: border-color .15s, transform .15s; }
-.game-tile .game-logo { width: 40px; height: 40px; border-radius: var(--r-lg); }
-.game-tile span { max-width: 100%; }
-.game-tile .tiny { font-weight: 400; }
-.game-tile:hover, .game-tile:focus-visible { border-color: var(--accent); transform: translateY(-1px); }
+/* Game pictures: Steam art of the game (wide for cards, square for icons) – initials while none is there */
+.gs-art, .gs-art.lazy-img { display: block; overflow: hidden; background: var(--surface-3); flex: none; }
+.gs-art img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.gs-art.wide { width: 100%; aspect-ratio: 460 / 215; }
+.gs-art.square { width: 40px; height: 40px; border-radius: var(--r-md); }
+.gs-mono { display: grid; place-items: center; font-weight: 700; letter-spacing: .02em; font-size: var(--fs-xl); color: hsl(var(--h) 60% 36%); background: linear-gradient(140deg, hsl(var(--h) 70% 55% / .26), hsl(calc(var(--h) + 45) 70% 50% / .12)); }
+[data-theme='dark'] .gs-mono { color: hsl(var(--h) 75% 74%); }
+.gs-mono.square { font-size: var(--fs-sm); }
+.game-logo.gs-art { border-radius: var(--r-md); }
+
+/* Create dialog, step 1: search on top, then filters, then big cards */
+.gs-browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.gs-search { flex: 1 1 260px; min-width: 0; }
+.gs-search .input { height: 40px; font-size: var(--fs-md); }
+.gs-browse-head .info-tip-btn { width: 32px; height: 32px; }
+.gs-browse-head .info-tip-btn svg { width: 16px; height: 16px; }
+.gs-filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.gs-filter { min-height: 32px; padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.gs-filter:hover { color: var(--text); border-color: var(--muted); }
+.gs-filter.on { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.gs-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gs-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--sp-3); }
+.gs-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.gs-card:hover, .gs-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+.gs-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gs-card-off { cursor: not-allowed; opacity: .55; }
+.gs-card-off:hover { transform: none; border-color: var(--line); box-shadow: none; }
+.gs-card-body { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); min-width: 0; flex: 1; }
+.gs-card-name { font-size: var(--fs-md); font-weight: 650; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gs-card-meta { display: flex; align-items: center; gap: var(--sp-2); margin-top: auto; min-height: 20px; }
+.gs-card-id { margin-left: auto; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--muted); }
+.gs-more { width: 100%; }
+.gs-list-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+
+/* Create dialog, step 2: picture + facts on top, a few clear fields */
+.gs-hero { display: grid; grid-template-columns: minmax(160px, 260px) 1fr; gap: var(--sp-4); align-items: center; }
+.gs-hero-art { border-radius: var(--r-lg); }
+.gs-form { display: grid; gap: var(--sp-4); }
+.gs-ram { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.gs-ram.tight { color: var(--warn-text); }
+@media (max-width: 560px) { .gs-hero { grid-template-columns: 1fr; } }
+
+/* Import tab */
+.gs-found-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-4); }
+.gs-found { overflow: hidden; display: flex; flex-direction: column; }
+.gs-found-art { border-bottom: 1px solid var(--line); }
+.gs-found-name { font-size: var(--fs-lg); }
+.gs-facts { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.gs-points { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-2); color: var(--text-2); }
+
+/* Quick start and picked game */
+.game-pick { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3); border: 1px solid var(--accent); border-radius: var(--r-lg); background: var(--accent-soft); }
+.game-pick .game-logo { width: 56px; height: 56px; border-radius: var(--r-xl); }
 .game-row { width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; font: inherit; color: var(--text); border-radius: var(--r-md); }
 .game-row:hover, .game-row:focus-visible { background: var(--surface-2); }
 .game-row.active { background: var(--accent-soft); color: var(--accent-text); }
-.game-row:disabled { cursor: not-allowed; opacity: .6; }
-.game-pick { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3); border: 1px solid var(--accent); border-radius: var(--r-lg); background: var(--accent-soft); }
-.game-pick .game-logo { width: 56px; height: 56px; border-radius: var(--r-xl); }
 
 /* Steps of the one-step setup */
 .gs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -42,8 +85,6 @@
 .gs-tight { gap: var(--sp-2); min-width: 0; }
 .gs-title { font-size: var(--fs-lg); }
 .gs-wrap { flex-wrap: wrap; gap: var(--sp-2); }
-.gs-list { gap: 2px; max-height: 340px; overflow: auto; }
-.gs-pad { padding: var(--sp-3); }
 .gs-ml { margin-left: var(--sp-2); }
 .gs-mb { margin-bottom: var(--sp-2); }
 .gs-mt { margin-top: var(--sp-1); }
@@ -64,4 +105,4 @@
 .gs-num { width: calc(var(--sp-8) * 5); }
 .gs-break { overflow-wrap: anywhere; }
 
-@media (prefers-reduced-motion: reduce) { .game-install-anim .ring, .game-install-anim > *, .game-tile { animation: none !important; transition: none; } }
+@media (prefers-reduced-motion: reduce) { .game-install-anim .ring, .game-install-anim > *, .gs-card { animation: none !important; transition: none; } }

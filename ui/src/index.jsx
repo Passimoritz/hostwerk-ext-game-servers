@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Gamepad2, Play, Download, Archive, Plus, Trash2, Settings2, TerminalSquare, Info, Monitor, ExternalLink, Wrench, FolderOpen, Users, LayoutDashboard, Network, BookOpen, Copy, CalendarClock, FileText, SlidersHorizontal, Boxes, RotateCcw } from 'lucide-react';
+import { Gamepad2, FolderInput, Play, Download, Archive, Plus, Trash2, Settings2, TerminalSquare, Info, Monitor, ExternalLink, Wrench, FolderOpen, Users, LayoutDashboard, Network, BookOpen, Copy, CalendarClock, FileText, SlidersHorizontal, Boxes, RotateCcw } from 'lucide-react';
 import { post, del, useApi, useStore, waitJob, IS_LINUX, isElectron } from '@hostwerk/api';
 import { Btn, Tabs, Seg, Empty, Loading, Callout, StatusPill, Progress, toast, confirmDialog, InfoTip } from '@hostwerk/ui';
-import { noImportTab, serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart } from '@hostwerk/kit';
+import { serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart } from '@hostwerk/kit';
 import { FileBrowser } from '@hostwerk/files';
 import { t } from '@hostwerk/i18n';
 import { BASE, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable } from './common';
@@ -10,6 +10,7 @@ import { CreateDialog, QuickStart, SetupSteps } from './setup';
 import { BackupsTab, CommandsTab, ConsoleTab, GuidesCard, GuidesTab, NetworkTab, OverviewTab, PlayersTab, ScheduleTab, useRun, WorkshopTab } from './tabs';
 import { LgsmConfig, SettingsTab, SteamConfig } from './settings';
 import { AddonTabs } from './addons';
+import { ImportTab } from './importer';
 import './style.css';
 
 /*
@@ -151,9 +152,10 @@ export function GamesPage({ path = [], ext }) {
   if (!d.data) return d.error ? <div className="page"><Empty icon={Gamepad2} title="The game servers could not be loaded" text={d.error} action={<Btn icon={RotateCcw} onClick={() => d.reload()}>Try again</Btn>} /></div> : <Loading />;
   const { linux, docker, dockerInstalled, requirements } = d.data;
   const startDocker = async () => { try { const r = await post('/docker/start'); toast('Docker engine is starting …'); await waitJob(r.job); toast.success('Docker is running'); d.reload(); askDockerAutostart(); } catch (e) { toast.error(e.message); } };
-  const cur = id && servers.find((s) => s.id === id);
+  const importing = id === 'import';
+  const cur = id && !importing && servers.find((s) => s.id === id);
   if (cur) return <Server s={cur} tab={tab || 'overview'} reload={d.reload} />;
-  if (id) return <div className="page"><Empty icon={Gamepad2} title="Server not found"><a className="btn" href={BASE}>{t('To the overview')}</a></Empty></div>;
+  if (id && !importing) return <div className="page"><Empty icon={Gamepad2} title="Server not found"><a className="btn" href={BASE}>{t('To the overview')}</a></Empty></div>;
   return (
     <div className="page fade-in">
       <div className="page-head">
@@ -164,7 +166,7 @@ export function GamesPage({ path = [], ext }) {
         </div>
       </div>
       <AddonTabs ext={ext}>
-      <Tabs value="servers" onChange={() => {}} tabs={[{ id: 'servers', label: t('Servers'), icon: Gamepad2, badge: servers.length }, noImportTab(t('Game servers'))]} />
+      <Tabs value={importing ? 'import' : 'servers'} onChange={(v) => { location.hash = v === 'import' ? `${BASE.slice(1)}/import` : BASE.slice(1); }} tabs={[{ id: 'servers', label: t('Servers'), icon: Gamepad2, badge: servers.length }, { id: 'import', label: t('Import'), icon: FolderInput, title: t('Take over game servers that already exist on this PC') }]} />
       {!linux && !docker && dockerInstalled && servers.some((s) => s.docker) && <Callout kind="warn" icon={Monitor} title="The Docker engine is not running right now" dismissible={false}>Servers in Docker containers need the engine. <Btn className="sm primary gs-ml" icon={Play} onClick={startDocker}>Start Docker</Btn></Callout>}
       {linux && requirements && (requirements.missing.length > 0 || requirements.root) && (
         <Callout kind="warn" title="Requirements" dismissible={false}>
@@ -172,7 +174,7 @@ export function GamesPage({ path = [], ext }) {
           {requirements.missing.length > 0 && <div className="small">{t('Missing programs:')} <b>{requirements.missing.join(', ')}</b>{requirements.installCmd && <><br />{t('Install ({distro}):', { distro: requirements.distro })}<pre className="tiny gs-mt">{requirements.installCmd}</pre></>}</div>}
         </Callout>
       )}
-      {servers.length === 0 ? (
+      {importing ? <ImportTab onDone={d.reload} /> : servers.length === 0 ? (
         <div className="stack">
           <QuickStart onMore={() => setCreate(true)} onDone={d.reload} />
           {!IS_LINUX && <InfoTip title="Two ways on Windows" icon={Monitor}>Steam server tools run right on this PC (most games have a Windows version). Games that only exist for Linux – and every LinuxGSM game – run in Hostwerk’s own Docker engine; the setup installs it for you when needed.</InfoTip>}

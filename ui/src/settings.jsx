@@ -147,7 +147,9 @@ export function RemoveCard({ s }) {
   return (
     <div className="card">
       <div className="card-head"><Trash2 size={16} /><h3>Remove</h3></div>
-      <div className="card-body row"><Btn className="danger" icon={Trash2} onClick={removeAll}>Delete server</Btn><Btn className="ghost" onClick={removeListOnly}>Only from the list</Btn></div>
+      {/* Imported in place: the folder was there before Hostwerk – it is never deleted, only the entry goes */}
+      {s.external ? <div className="card-body row"><Btn className="danger" icon={Trash2} onClick={removeListOnly}>Remove from Hostwerk</Btn><span className="small muted">{t('The folder stays where it is: {dir}', { dir: s.dir })}</span></div>
+        : <div className="card-body row"><Btn className="danger" icon={Trash2} onClick={removeAll}>Delete server</Btn><Btn className="ghost" onClick={removeListOnly}>Only from the list</Btn></div>}
     </div>
   );
 }

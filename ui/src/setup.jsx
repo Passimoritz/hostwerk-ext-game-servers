@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Search, Plus, TerminalSquare, RefreshCw, Rocket, Check, Boxes } from 'lucide-react';
-import { get, post, useApi, fmtBytes, fmtDate } from '@hostwerk/api';
-import { Btn, Seg, Field, Loading, Modal, toast, InfoTip } from '@hostwerk/ui';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, Plus, TerminalSquare, RefreshCw, Rocket, Check, Boxes, ArrowLeft, MemoryStick, Container, Monitor, FolderOpen, HardDrive, AlertTriangle } from 'lucide-react';
+import { get, post, useApi, fmtDate } from '@hostwerk/api';
+import { Btn, Seg, Field, Loading, Empty, Modal, toast, InfoTip, PathInput } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { GameLogo, goServer } from './common';
+import { GameArt, GameLogo, goServer } from './common';
 
-/* Game servers – one-step setup and the create dialog (LinuxGSM and SteamCMD). */
+/* Game servers – one-step setup and the create dialog (pick a game → set it up), both ways (SteamCMD and LinuxGSM). */
 
 /* ---------------------------------------------------------------- one-step setup */
 
@@ -60,16 +60,10 @@ export function QuickStart({ onMore, onDone }) {
         {!sel ? (
           <>
             <div className="label">1. Pick a game</div>
-            <div className="game-tiles">
-              {env.picks.map((p) => (
-                <button key={p.key} type="button" className="game-tile" onClick={() => { setSel(p); setName(''); }} title={p.name}>
-                  <GameLogo short={p.short} appid={p.method === 'steam' ? p.gameAppId : null} size={40} name={p.name} />
-                  <span className="ellipsis">{p.name}</span>
-                  <span className="tiny muted">{p.method === 'steam' ? 'SteamCMD' : 'LinuxGSM'}{p.needsDocker ? ' · Docker' : ''}</span>
-                </button>
-              ))}
+            <div className="gs-cards">
+              {env.picks.map((p) => <PickCard key={p.key} pick={{ ...p, game: p.method === 'steam' ? p.gameAppId : p.game, appid: p.appid }} onPick={() => { setSel(p); setName(''); }} badge={p.needsDocker ? 'Docker' : null} />)}
             </div>
-            <div className="row-tight"><Btn className="ghost sm" icon={Search} onClick={onMore}>All games …</Btn><span className="tiny muted">{t('Every LinuxGSM game and every Steam server tool')}</span></div>
+            <div className="row-tight"><Btn className="ghost" icon={Search} onClick={onMore}>All games …</Btn></div>
           </>
         ) : (
           <>
@@ -79,7 +73,7 @@ export function QuickStart({ onMore, onDone }) {
                 <div><b className="gs-title">{sel.name}</b><div className="tiny muted">{sel.method === 'steam' ? t('Steam server tool through SteamCMD') : t('LinuxGSM')}{sel.needsDocker ? t(' · runs as a Docker container') : ''}</div></div>
                 <Field label="Name of the server"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={sel.name} /></Field>
               </div>
-              <button type="button" className="btn ghost sm" onClick={() => setSel(null)}>Other game</button>
+              <Btn className="ghost" onClick={() => setSel(null)}>Other game</Btn>
             </div>
             <div className="label">2. What happens</div>
             <SetupSteps steps={steps} />
@@ -91,108 +85,245 @@ export function QuickStart({ onMore, onDone }) {
   );
 }
 
-/* ---------------------------------------------------------------- create dialog (both methods) */
+/* ---------------------------------------------------------------- create dialog: 1. pick a game */
 
-export function SteamPicker({ sel, setSel }) {
-  const [q, setQ] = useState('');
+/** Name of the game from the name of its server tool ("Valheim Dedicated Server" → "Valheim"). */
+export const gameName = (n) => String(n || '').replace(/\s*\((dedicated server|server)[^)]*\)\s*$/i, '').replace(/\s*(dedicated server|server|ds)$/i, '').trim() || String(n || '');
+
+/** Steam entry of the list → pick (same shape for both ways). */
+const steamPick = (a) => ({ method: 'steam', key: `steam-${a.appid}`, appid: a.appid, game: a.game, name: gameName(a.name), tool: a.name, profile: a.profile, popular: a.popular, ram: a.ram, plan: a.plan, off: a.plan && a.plan.reason ? a.plan.reason : null, needsDocker: !!(a.plan && a.plan.needsDocker) });
+const lgsmPick = (g, linux) => ({ method: 'lgsm', key: g.game, game: g.game, short: g.short, name: t(g.hint || g.name), tool: g.name, os: g.os, popular: g.popular !== null && g.popular !== undefined, ram: g.ram, needsDocker: !linux });
+
+/** One game as a card: picture, name, at most one badge, the id quietly at the bottom. */
+export function PickCard({ pick, onPick, badge = null, warn = null }) {
+  const off = !!pick.off;
+  const why = pick.off === 'login' ? t('Needs a Steam account that owns the game') : off ? t('Not available on this system') : null;
+  return (
+    <button type="button" className={`gs-card${off ? ' gs-card-off' : ''}`} onClick={onPick} disabled={off} title={why || pick.tool || pick.name} aria-label={why ? `${pick.name} – ${why}` : pick.name}>
+      <GameArt appid={pick.method === 'steam' ? pick.appid : null} game={pick.method === 'steam' ? pick.game : null} short={pick.short} name={pick.name} shape="wide" />
+      <span className="gs-card-body">
+        <span className="gs-card-name">{pick.name}</span>
+        <span className="gs-card-meta">
+          {warn ? <span className="badge warn">{warn}</span> : badge ? <span className="badge">{badge}</span> : null}
+          <span className="gs-card-id">{pick.method === 'steam' ? pick.appid : pick.game}</span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+const FILTERS = {
+  steam: [{ id: '', label: 'All' }, { id: 'ready', label: 'Ready-made start' }, { id: 'native', label: 'Runs without Docker' }],
+  lgsm: [{ id: '', label: 'All' }, { id: 'popular', label: 'Popular' }],
+};
+
+/** Card badge: only what matters for the choice – Steam login (can not install), Docker (extra engine), else nothing. */
+function badgeOf(p) {
+  if (p.off === 'login') return { warn: t('Steam login') };
+  if (p.off) return { warn: t('other system') };
+  if (p.method === 'steam' && p.needsDocker) return { badge: 'Docker' };
+  return {};
+}
+
+function SteamGrid({ q, filter, onPick }) {
   const [page, setPage] = useState({ items: [], total: 0, list: null });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [loadingFull, setLoadingFull] = useState(false);
-  const load = async (query, offset = 0) => {
+  const load = async (offset = 0) => {
     setBusy(true);
     try {
-      const r = await get(`/games/steam/apps?q=${encodeURIComponent(query)}&offset=${offset}&limit=40`);
+      const r = await get(`/games/steam/apps?q=${encodeURIComponent(q)}&filter=${filter}&offset=${offset}&limit=36`);
       setPage((p) => ({ ...r, items: offset ? [...p.items, ...r.items] : r.items }));
     } catch (e) { toast.error(e.message); }
     setBusy(false);
   };
-  useEffect(() => { const x = setTimeout(() => load(q), q ? 250 : 0); return () => clearTimeout(x); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const x = setTimeout(() => load(0), q ? 250 : 0); return () => clearTimeout(x); }, [q, filter]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadFull = async () => {
     setLoadingFull(true);
-    try { const st = await post('/games/steam/apps/refresh', { force: !!(page.list && page.list.full) }); toast.success(t('{n} Steam server tools found', { n: st.count })); load(q); } catch (e) { toast.error(e.message); }
+    try { const st = await post('/games/steam/apps/refresh', { force: !!(page.list && page.list.full) }); toast.success(t('{n} Steam server tools found', { n: st.count })); load(0); } catch (e) { toast.error(e.message); }
     setLoadingFull(false);
   };
   const st = page.list;
   return (
-    <div className="stack">
-      <div className="input-icon"><Search /><input className="input" aria-label={t('Search server tool')} placeholder="Search game or Steam app id (e.g. Valheim, 896660) …" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
-      {st && (
-        <div className="row-tight tiny muted gs-wrap">
-          {st.full ? t('{n} built-in plus {m} from Steam (list from {date}, {size} on disk)', { n: st.builtIn, m: st.count, date: fmtDate(st.fetchedAt), size: fmtBytes(st.bytes) }) : t('{n} server tools built in.', { n: st.builtIn })}
-          <Btn className="xs ghost" icon={RefreshCw} busy={loadingFull} onClick={loadFull}>{st.full ? t('Refresh list') : t('Load every Steam server tool')}</Btn>
-          <InfoTip inline title="Small and once">Hostwerk reads Steam's app list once as a stream, keeps only server tools (a few hundred KB, gzipped) and reuses them for 7 days. Searching happens in Hostwerk – only one page at a time reaches this window.</InfoTip>
+    <>
+      {page.items.length > 0 && (
+        <div className="gs-cards">
+          {page.items.map((a) => { const p = steamPick(a); return <PickCard key={p.key} pick={p} onPick={() => onPick(p)} {...badgeOf(p)} />; })}
         </div>
       )}
-      <div className="stack gs-list" role="listbox" aria-label={t('Steam server tools')}>
-        {page.items.map((a) => {
-          const off = !!a.plan.reason;
-          return (
-            <button key={a.appid} type="button" role="option" aria-selected={sel && sel.appid === a.appid} className={`list-item game-row ${sel && sel.appid === a.appid ? 'active' : ''}`} disabled={off} onClick={() => setSel(a)} title={off ? (a.plan.reason === 'login' ? t('Needs a Steam account that owns the game') : t('Not available on this system')) : a.name}>
-              <GameLogo appid={a.game} size={28} name={a.name} />
-              <div className="grow small ellipsis"><b>{a.name}</b>{a.profile && <span className="badge accent gs-ml">{t('ready-made start')}</span>}{a.plan.needsDocker && <span className="badge gs-ml">Docker</span>}{off && <span className="badge warn gs-ml">{a.plan.reason === 'login' ? t('Steam login') : t('other system')}</span>}</div>
-              <span className="tiny muted mono">{a.appid}</span>
-            </button>
-          );
-        })}
-        {!busy && page.items.length === 0 && <div className="small muted gs-pad">{t('Nothing found.')}{st && !st.full ? ` ${t('Load every Steam server tool to search all of them.')}` : ''}</div>}
-        {busy && <Loading />}
+      {busy && <Loading />}
+      {!busy && page.items.length === 0 && <Empty icon={Search} title="Nothing found" text={st && !st.full ? t('Load every Steam server tool to search all of them.') : t('Try another name or the Steam app id.')} />}
+      {page.items.length < page.total && !busy && <Btn className="gs-more" onClick={() => load(page.items.length)}>{t('Show more ({n} left)', { n: page.total - page.items.length })}</Btn>}
+      {st && (
+        <div className="gs-list-foot">
+          <span className="small muted">{st.full ? t('{n} built-in plus {m} from Steam (list from {date})', { n: st.builtIn, m: st.count, date: fmtDate(st.fetchedAt) }) : t('Game missing? {n} server tools are built in – Steam knows many more.', { n: st.builtIn })}</span>
+          <Btn className="ghost" icon={RefreshCw} busy={loadingFull} onClick={loadFull}>{st.full ? t('Refresh list') : t('Load every Steam server tool')}</Btn>
+        </div>
+      )}
+    </>
+  );
+}
+
+function LgsmGrid({ q, filter, onPick, linux }) {
+  const [cat, setCat] = useState(null);
+  const [err, setErr] = useState(null);
+  const [more, setMore] = useState(48);
+  useEffect(() => { get('/games/catalog').then(setCat).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => { setMore(48); }, [q, filter]);
+  const list = useMemo(() => {
+    if (!cat) return [];
+    const term = q.trim().toLowerCase();
+    let games = cat.games.filter((g) => !term || `${g.name} ${g.game} ${g.hint || ''}`.toLowerCase().includes(term));
+    if (filter === 'popular') games = games.filter((g) => g.popular !== null && g.popular !== undefined);
+    const pop = (g) => (g.popular === null || g.popular === undefined ? 1000 : g.popular);
+    return [...games].sort((a, b) => (term ? 0 : pop(a) - pop(b)) || a.name.localeCompare(b.name)).map((g) => lgsmPick(g, linux));
+  }, [cat, q, filter, linux]);
+  if (err) return <Empty icon={AlertTriangle} title="The game list could not be loaded" text={err} />;
+  if (!cat) return <Loading />;
+  if (!list.length) return <Empty icon={Search} title="No game found" text={t('LinuxGSM does not know it (yet). Try “Steam (SteamCMD)”.')} />;
+  return (
+    <>
+      <div className="gs-cards">{list.slice(0, more).map((p) => <PickCard key={p.key} pick={p} onPick={() => onPick(p)} />)}</div>
+      {list.length > more && <Btn className="gs-more" onClick={() => setMore(more + 48)}>{t('Show more ({n} left)', { n: list.length - more })}</Btn>}
+    </>
+  );
+}
+
+function GameBrowser({ method, setMethod, linux, onPick }) {
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState('');
+  useEffect(() => { setFilter(''); }, [method]);
+  return (
+    <div className="stack gs-browser">
+      <div className="gs-browse-head">
+        <div className="input-icon gs-search"><Search /><input className="input" aria-label={t('Search game')} placeholder={method === 'steam' ? t('Search game or Steam app id …') : t('Search game …')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
+        <Seg value={method} onChange={setMethod} options={[{ id: 'steam', label: 'Steam (SteamCMD)', icon: Boxes }, { id: 'lgsm', label: 'LinuxGSM', icon: TerminalSquare }]} />
+        <InfoTip pop title="Two ways to a game server">
+          {t('Steam (SteamCMD): every Steam game with a dedicated server tool – straight on this PC where the tool exists for it, otherwise in Docker. SteamCMD fetches updates on every start.')}{' '}
+          {linux ? t('LinuxGSM: more than 100 games with tried and tested scripts, right on this Linux machine.') : t('LinuxGSM: more than 100 games with tried and tested scripts – on Windows they run in a Docker container.')}{' '}
+          {t('The full Steam list is read once, only the server tools are kept (a few hundred KB) and reused for 7 days.')}
+        </InfoTip>
       </div>
-      {page.items.length < page.total && <Btn className="ghost sm" busy={busy} onClick={() => load(q, page.items.length)}>{t('Show more ({n} left)', { n: page.total - page.items.length })}</Btn>}
+      <div className="gs-filters" role="radiogroup" aria-label={t('Filter')}>
+        {FILTERS[method].filter((f) => !(linux && f.id === 'native')).map((f) => <button key={f.id || 'all'} type="button" role="radio" aria-checked={filter === f.id} className={`gs-filter${filter === f.id ? ' on' : ''}`} onClick={() => setFilter(f.id)}>{t(f.label)}</button>)}
+      </div>
+      {method === 'steam' ? <SteamGrid q={q} filter={filter} onPick={onPick} /> : <LgsmGrid q={q} filter={filter} onPick={onPick} linux={linux} />}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- create dialog: 2. set it up */
+
+/** Memory hint: "about 8 GB – this PC has 16 GB" (warning when it gets tight). */
+export function RamHint({ ram }) {
+  if (!ram) return null;
+  return (
+    <span className={`gs-ram${ram.tight ? ' tight' : ''}`}>
+      <MemoryStick size={14} aria-hidden="true" />
+      {ram.tight ? t('Wants about {gb} GB memory – this PC has {total} GB, it may get tight.', { gb: ram.gb, total: ram.total }) : t('Wants about {gb} GB memory (this PC: {total} GB)', { gb: ram.gb, total: ram.total })}
+    </span>
+  );
+}
+
+/** Port with a free suggestion: checked against the other game servers and the programs on this PC. */
+function PortField({ appid, port, setPort }) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const x = setTimeout(() => {
+      get(`/games/ports/suggest?appid=${appid}${port ? `&port=${port}` : ''}`).then((r) => { if (!alive) return; setInfo(r); if (!port && r.port) setPort(r.port); }).catch(() => {});
+    }, port ? 400 : 0);
+    return () => { alive = false; clearTimeout(x); };
+  }, [appid, port]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clash = info && Number(port) === info.base && info.taken && info.taken.length > 0;
+  const list = info && info.ports ? info.ports.map((p) => `${p.port}/${p.proto}`).join(', ') : '';
+  return (
+    <Field label="Port">
+      <div className="row-tight gs-wrap">
+        <input className="input gs-num" type="number" min={1024} max={65535} value={port || ''} onChange={(e) => setPort(Number(e.target.value) || '')} aria-label={t('Port')} />
+        {clash && info.port !== info.base ? (
+          <><span className="small gs-warn">{t('Taken ({ports})', { ports: info.taken.join(', ') })}</span><Btn className="ghost" onClick={() => setPort(info.port)}>{t('Use {port}', { port: info.port })}</Btn></>
+        ) : info && info.port === Number(port) ? <span className="small muted">{info.moved ? t('Free – moved because the default is taken') : t('Free')}{list ? ` · ${list}` : ''}</span> : null}
+      </div>
+    </Field>
+  );
+}
+
+function SetupForm({ pick, linux, env, name, setName, opts, setOpts }) {
+  const steam = pick.method === 'steam';
+  const canDocker = steam ? !!(pick.plan && pick.plan.docker) : linux;
+  const mode = opts.mode || (pick.needsDocker ? 'docker' : 'native');
+  const steps = plannedSteps({ ...pick, needsDocker: mode === 'docker' }, env || { docker: false, dockerInstalled: false });
+  const place = opts.place || 'hostwerk';
+  return (
+    <div className="stack gs-setup">
+      <div className="gs-hero">
+        <GameArt appid={steam ? pick.appid : null} game={steam ? pick.game : null} short={pick.short} name={pick.name} shape="wide" className="gs-hero-art" />
+        <div className="stack gs-tight">
+          <b className="gs-title">{pick.name}</b>
+          <span className="small muted">{steam ? t('Steam server tool {id} through SteamCMD', { id: pick.appid }) : t('LinuxGSM script {game}', { game: pick.game })}</span>
+          <RamHint ram={pick.ram} />
+          {steam && pick.plan && pick.plan.custom && <span className="small gs-warn">{t('No ready-made start for this tool yet – after installing, choose the program and parameters under Settings → Start.')}</span>}
+        </div>
+      </div>
+      <div className="gs-form">
+        <Field label="Name of the server"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={pick.name} autoFocus /></Field>
+        {steam && pick.profile && <PortField appid={pick.appid} port={opts.port} setPort={(port) => setOpts((o) => ({ ...o, port }))} />}
+        {(canDocker || (!steam && !linux)) && (
+          <Field label="Runs">
+            {canDocker ? (
+              <Seg value={mode} onChange={(m) => setOpts((o) => ({ ...o, mode: m }))} options={[{ id: 'native', label: t('Right on this PC'), icon: Monitor }, { id: 'docker', label: t('In Docker'), icon: Container }]} />
+            ) : <span className="small muted">{t('In a Docker container – LinuxGSM needs Linux.')}</span>}
+          </Field>
+        )}
+        {steam && mode === 'native' && (
+          <Field label="Where the files go">
+            <Seg value={place} onChange={(v) => setOpts((o) => ({ ...o, place: v }))} options={[{ id: 'hostwerk', label: t("In Hostwerk's folder"), icon: HardDrive }, { id: 'own', label: t('Own folder'), icon: FolderOpen }]} />
+            {place === 'own' && <PathInput mode="folder" value={opts.dir || ''} onChange={(dir) => setOpts((o) => ({ ...o, dir }))} placeholder={t('Empty or new folder')} />}
+          </Field>
+        )}
+        {mode === 'docker' && <span className="small muted">{t('The files live in a Docker volume of this server.')}</span>}
+      </div>
+      <div className="label">{t('What happens')}</div>
+      <SetupSteps steps={steps} />
     </div>
   );
 }
 
 export function CreateDialog({ onClose, onDone, linux }) {
   const [method, setMethod] = useState(linux ? 'lgsm' : 'steam');
-  const [cat, setCat] = useState(null);
-  const [q, setQ] = useState('');
-  const [sel, setSel] = useState(null);
+  const [pick, setPick] = useState(null);
   const [name, setName] = useState('');
+  const [opts, setOpts] = useState({});
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (method === 'lgsm' && !cat) get('/games/catalog').then(setCat).catch((e) => toast.error(e.message)); }, [method]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSel(null); setName(''); }, [method]);
-  const list = cat ? cat.games.filter((g) => !q || `${g.name} ${g.game} ${g.hint || ''}`.toLowerCase().includes(q.toLowerCase())) : [];
-  const favs = cat ? cat.games.filter((g) => g.hint) : [];
+  const env = useApi('/games/quick-picks', [], { live: false });
+  const choose = (p) => { setPick(p); setName(''); setOpts({}); };
   const create = async () => {
     setBusy(true);
     try {
-      const body = method === 'steam' ? { method: 'steam', appid: sel.appid, name: name || sel.name.replace(/\s*(dedicated server|server)$/i, '') } : { method: 'lgsm', game: sel.game, name: name || sel.hint || sel.name, mode: linux ? 'native' : 'docker' };
-      const r = await post('/games', { ...body, start: true });
-      toast('The server is being set up – depending on the game this can take long (download through SteamCMD).');
+      const mode = opts.mode || (pick.needsDocker ? 'docker' : 'native');
+      const body = pick.method === 'steam'
+        ? { method: 'steam', appid: pick.appid, name: name || pick.name, mode, ...(opts.port ? { port: opts.port } : {}), ...(mode === 'native' && opts.place === 'own' && opts.dir ? { dir: opts.dir } : {}) }
+        : { method: 'lgsm', game: pick.game, name: name || pick.name, mode: linux ? mode : 'docker' };
+      const r = await post('/games', { ...body, start: true, installDocker: true });
+      toast(t('“{name}” is being set up – progress on its page.', { name: name || pick.name }));
       onDone(); goServer(r.id);
     } catch (e) { toast.error(e.message); }
     setBusy(false);
   };
-  const steamCustom = method === 'steam' && sel && sel.plan && sel.plan.custom;
+  const ownMissing = pick && opts.place === 'own' && !String(opts.dir || '').trim() && (opts.mode || (pick.needsDocker ? 'docker' : 'native')) === 'native';
   return (
-    <Modal title="Create game server" subtitle="LinuxGSM or a Steam server tool – installed through SteamCMD" onClose={onClose} size="lg" footer={<><Btn onClick={onClose}>Cancel</Btn><Btn className="primary" icon={Plus} busy={busy} disabled={!sel} onClick={create}>Create & start</Btn></>}>
-      <div className="stack">
-        <Seg value={method} onChange={setMethod} options={[{ id: 'steam', label: 'Steam (SteamCMD)', icon: Boxes }, { id: 'lgsm', label: 'LinuxGSM', icon: TerminalSquare }]} />
-        <div className="tiny muted">{method === 'steam' ? t('Every Steam game with a dedicated server tool – natively on this PC where the tool exists, else in Docker. Updates: SteamCMD on every start.') : linux ? t('More than 100 games with tried and tested scripts – natively on this Linux machine.') : t('More than 100 games with tried and tested scripts – on Windows in a Docker container.')}</div>
-        {sel ? (
-          <div className="game-pick">
-            {method === 'steam' ? <GameLogo appid={sel.game} size={56} name={sel.name} /> : <GameLogo short={sel.short} size={56} name={sel.name} />}
-            <div className="grow stack gs-tight">
-              <div><b className="gs-title">{sel.name}</b>
-                <div className="tiny muted">{method === 'steam' ? t('Steam app {id}{docker}', { id: sel.appid, docker: sel.plan.needsDocker ? t(' · runs as a Docker container') : '' }) : t('LinuxGSM script {game} · {os}', { game: sel.game, os: sel.os })}{method === 'lgsm' && !linux ? t(' · runs as a Docker container') : ''}</div>
-              </div>
-              <Field label="Name of the server"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={method === 'steam' ? sel.name.replace(/\s*(dedicated server|server)$/i, '') : sel.hint || sel.name} /></Field>
-              {steamCustom && <div className="tiny gs-warn">{t('No ready-made start for this tool yet – after installing, choose the program and parameters under Settings → Start.')}</div>}
-            </div>
-            <button type="button" className="btn ghost sm" onClick={() => setSel(null)}>Other game</button>
-          </div>
-        ) : method === 'steam' ? <SteamPicker sel={sel} setSel={setSel} /> : !cat ? <Loading /> : (
-          <>
-            <div className="input-icon"><Search /><input className="input" aria-label={t('Search game')} placeholder="Search game (e.g. Valheim, Rust, Terraria) …" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
-            {!q && <div><div className="label gs-mb">Popular</div><div className="game-tiles">{favs.slice(0, 12).map((g) => <button key={g.game} type="button" className="game-tile" onClick={() => setSel(g)} title={g.name}><GameLogo short={g.short} size={40} name={g.name} /><span className="ellipsis">{t(g.hint || g.name)}</span></button>)}</div></div>}
-            <div className="stack gs-list">
-              {!q && <div className="label">{t('All games ({n})', { n: cat.games.length })}</div>}
-              {(q ? list : cat.games).slice(0, 150).map((g) => <button key={g.game} type="button" className="list-item game-row" onClick={() => setSel(g)}><GameLogo short={g.short} size={28} name={g.name} /><div className="grow small ellipsis"><b>{g.name}</b>{g.hint && <span className="badge gs-ml">{t('popular')}</span>}</div><span className="tiny muted mono">{g.game}</span></button>)}
-              {q && list.length === 0 && <div className="small muted gs-pad">No game found – LinuxGSM does not know it (yet). Try “Steam (SteamCMD)”.</div>}
-            </div>
-          </>
-        )}
-      </div>
+    <Modal
+      title={pick ? t('Set up {game}', { game: pick.name }) : t('Create game server')}
+      subtitle={pick ? t('Step 2 of 2 – name, port and place') : t('Step 1 of 2 – pick a game')}
+      onClose={onClose}
+      size="wide"
+      footer={pick ? (
+        <><Btn icon={ArrowLeft} onClick={() => setPick(null)}>Back</Btn><span className="grow" /><Btn onClick={onClose}>Cancel</Btn><Btn className="primary" icon={Plus} busy={busy} disabled={ownMissing} onClick={create}>Create & start</Btn></>
+      ) : <Btn onClick={onClose}>Cancel</Btn>}
+    >
+      {pick ? <SetupForm pick={pick} linux={linux} env={env.data} name={name} setName={setName} opts={opts} setOpts={setOpts} /> : <GameBrowser method={method} setMethod={setMethod} linux={linux} onPick={choose} />}
     </Modal>
   );
 }
+
