@@ -9,6 +9,7 @@ const { imageSource } = require('./imageupdates');
 exports.activate = (host) => {
   const games = host.provide('games', new GameServers(host));
   games.routes(host.router);
+  require('./extras').extras(games, host); // Meldungen (Absturz/Update, Discord), Spieler für andere Erweiterungen, Steam-Workshop
   // "Start with Hostwerk": native servers right away, Docker servers once the engine is ready (monitor tick)
   host.on('autostart', () => (process.env.HW_TEST ? [] : [() => games.startAutostart()]));
   // Synergie mit Router & Portfreigaben: „von außen erreichbar“ → Firewall und Router-Automatik (Hostwerk ab 2.11)

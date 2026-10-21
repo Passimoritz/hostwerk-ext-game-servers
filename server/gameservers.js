@@ -133,6 +133,12 @@ class GameServers {
   }
   stop() { for (const t of this.timers) clearInterval(t); this.timers = []; }
   broadcast(msg) { H.broadcast(msg); }
+  /** Meldung über einen Server (Absturz, Update): Hostwerks Kanäle und Discord (server/notify.js), sonst nur in der Oberfläche. */
+  alert(event, text, kind = 'warn') {
+    if (this.notifier) return this.notifier({ event, text, kind }).catch(() => {});
+    this.broadcast({ type: 'toast', kind, text });
+    return Promise.resolve();
+  }
   get cfg() { const s = this.ctx.settings.get(); if (!s.games) s.games = { servers: [] }; return s.games; }
   list() { return this.cfg.servers; }
   get(id) { const s = this.list().find((x) => x.id === id); if (!s) throw Object.assign(new Error(T('Game server not found')), { status: 404 }); return s; }
@@ -657,7 +663,7 @@ class GameServers {
       const crashed = this.seen.has(s.id) && (oom === 'true' || (Number(code) !== 0 && Number(code) !== 143));
       this.seen.delete(s.id);
       if (!crashed) { s.wantRun = false; this.ctx.settings.save(); this.broadcast({ type: 'games' }); continue; }
-      try { await this.dx(['start', this.cname(s)], { timeout: 60000 }); this.seen.add(s.id); this.broadcast({ type: 'toast', kind: 'warn', text: T('{name} crashed (code {code}) and was restarted (monitor).', { name: s.name, code }) }); this.broadcast({ type: 'games' }); } catch { /* next round */ }
+      try { await this.dx(['start', this.cname(s)], { timeout: 60000 }); this.seen.add(s.id); this.alert('crash', T('{name} crashed (code {code}) and was restarted (monitor).', { name: s.name, code }), 'warn'); this.broadcast({ type: 'games' }); } catch { /* next round */ }
     }
   }
   /*
@@ -709,6 +715,8 @@ class GameServers {
     const answers = await Promise.all(cands.map((port) => queryInfo('127.0.0.1', port, 700).catch(() => null)));
     const k = answers.findIndex(Boolean);
     if (k >= 0) { v = { ...answers[k], queryPort: cands[k] }; if (s.queryPort !== cands[k]) { s.queryPort = cands[k]; this.ctx.settings.save(); } }
+    // Neue Spielversion (z. B. nach dem automatischen Update) – einmal melden
+    if (v && v.version && s.lastVersion !== v.version) { if (s.lastVersion) this.alert('update', T('{name} now runs version {version}.', { name: s.name, version: v.version }), 'info'); s.lastVersion = v.version; this.ctx.settings.save(); }
     this.liveCache.set(s.id, { at: Date.now(), v });
     // No port details yet: read "details" once in the background (LinuxGSM knows the game's ports)
     if (!s.detail && !this.detailBusy && s.installed && !this.isSteam(s)) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
@@ -736,6 +744,20 @@ class GameServers {
       steam: steam ? this.steam.info(s) : null, limits: s.limits || null,
     // „Von außen erreichbar“: geht ab Hostwerk 2.11 (Ports an Firewall/Router); router/auto für den passenden Hinweis
     outside: { supported: !!(this.ctx.security && this.ctx.security.addPortProvider), router: !!this.ctx.router, auto: !!(this.ctx.router && this.ctx.router.cfg && this.ctx.router.cfg.auto) } };
+  }
+  /** Spieler eines laufenden Servers per Steam-Abfrage (A2S) – für die Seite und andere Erweiterungen (Spieler-Ticker, Bestenliste). */
+  async players(s) {
+    const live = await this.live(s).catch(() => null);
+    return { live, players: live ? (await core('a2s').queryPlayers('127.0.0.1', live.queryPort, 1200).catch(() => null)) || [] : [] };
+  }
+  /** Alle laufenden Server mit ihren Spielern: [{ id, name, game, players: [{ name, seconds, score }], count, max }] */
+  async allPlayers() {
+    const out = [];
+    for (const s of this.list().filter((x) => x.running)) {
+      const p = await this.players(s).catch(() => ({ live: null, players: [] }));
+      out.push({ id: s.id, name: s.name, game: s.gameName || s.game, players: p.players.filter((x) => x.name).map((x) => ({ name: x.name, seconds: Math.round(x.seconds || 0), score: x.score || 0 })), count: p.live ? p.live.players : 0, max: p.live ? p.live.maxPlayers : null });
+    }
+    return out;
   }
   async infoLive(s) { const i = this.info(s); i.live = await this.live(s).catch(() => null); return i; }
   async dockerAvailable() { try { await this.ctx.docker.cli(); return true; } catch { return false; } }
@@ -770,7 +792,7 @@ class GameServers {
     r.get('/games/:id/textfile', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Only for Steam servers – LinuxGSM uses its .cfg.')), { status: 400 }); res.json(await this.steam.readText(s, req.query.path)); });
     r.put('/games/:id/textfile', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Only for Steam servers – LinuxGSM uses its .cfg.')), { status: 400 }); res.json(await this.steam.writeText(s, (req.body || {}).path, (req.body || {}).content)); });
     r.post('/games/:id/backups/:file/restore', async (req, res) => { const s = this.get(req.params.id); if (!this.isSteam(s)) throw Object.assign(new Error(T('Restoring LinuxGSM backups: see the LinuxGSM guide (the archive holds the whole server).')), { status: 400 }); res.json(await this.steam.restore(s, req.params.file)); });
-    r.get('/games/:id/players', async (req, res) => { const s = this.get(req.params.id); const live = await this.live(s); res.json({ live, players: live ? (await core('a2s').queryPlayers('127.0.0.1', live.queryPort, 1200).catch(() => null)) || [] : [] }); });
+    r.get('/games/:id/players', async (req, res) => res.json(await this.players(this.get(req.params.id))));
     r.post('/games/:id/send', async (req, res) => res.json(await this.send(this.get(req.params.id), (req.body || {}).command)));
     r.delete('/games/:id/backups/:file', (req, res) => { const s = this.get(req.params.id); const f = path.basename(req.params.file); if (!(this.isSteam(s) ? /\.(zip|tar\.gz)$/ : /\.tar\.gz$/).test(f)) throw new Error(T('Not a backup')); fs.rmSync(path.join(this.dir(s), 'backups', f), { force: true }); res.json({ ok: true }); });
     r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string' && b.name.trim()) s.name = b.name.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate', 'public']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); if (typeof b.public === 'boolean') this.portsChanged(); res.json(this.info(s)); });

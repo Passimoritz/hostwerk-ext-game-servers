@@ -518,9 +518,9 @@ class SteamServers {
     if (!crashedHere) { s.wantRun = false; s.pid = null; this.ctx.settings.save(); this.gs.broadcast({ type: 'games' }); return; }
     const now = Date.now();
     const recent = (this.restarts.get(s.id) || []).filter((t) => now - t < 30 * 60000);
-    if (recent.length >= 3) { s.wantRun = false; this.ctx.settings.save(); this.gs.broadcast({ type: 'toast', kind: 'error', text: this.T('{name} keeps crashing – the monitor gives up for now.', { name: s.name }) }); return; }
+    if (recent.length >= 3) { s.wantRun = false; this.ctx.settings.save(); this.gs.alert('crash', this.T('{name} keeps crashing – the monitor gives up for now.', { name: s.name }), 'error'); return; }
     recent.push(now); this.restarts.set(s.id, recent);
-    try { await this.run(s, 'start').promise; seen.add(s.id); this.gs.broadcast({ type: 'toast', kind: 'warn', text: this.T('{name} crashed and was restarted (monitor).', { name: s.name }) }); } catch { /* next round */ }
+    try { await this.run(s, 'start').promise; seen.add(s.id); this.gs.alert('crash', this.T('{name} crashed and was restarted (monitor).', { name: s.name }), 'warn'); } catch { /* next round */ }
   }
 
   /** Remove: stop, delete container and (optionally) files. */
