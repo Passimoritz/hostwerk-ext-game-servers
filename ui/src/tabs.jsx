@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Gamepad2, Download, ShieldCheck, Archive, Plus, Trash2, TerminalSquare, Info, RefreshCw, ExternalLink, Wrench, Users, Network, BookOpen, Copy, Map as MapIcon, Tag, Send, Lock, CalendarClock, Check, RotateCcw, KeyRound, Boxes, Save, FolderOpen } from 'lucide-react';
+import { Gamepad2, Download, ShieldCheck, Archive, Plus, Trash2, TerminalSquare, Info, RefreshCw, ExternalLink, Wrench, Users, Network, BookOpen, Copy, Map as MapIcon, Tag, Send, Lock, CalendarClock, Check, RotateCcw, KeyRound, Boxes, Save, FolderOpen, FileText } from 'lucide-react';
 import { get, post, del, useApi, waitJob, fmtBytes, fmtDate, openExternal, useRefresh, put } from '@hostwerk/api';
 import { Btn, Field, Empty, Loading, StatusPill, toast, confirmDialog, InfoTip } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { BASE, cmdLabel, copy, fmtTime, isSteam } from './common';
+import { BASE, cmdLabel, copy, fmtTime, isSteam, isBusy, busyReason, PhaseBar, stateOf, stateLabel } from './common';
 
 /* Game servers – detail tabs of one server: overview, network, guides, console, players, workshop, schedule, backups, commands. */
 
@@ -38,16 +38,19 @@ export function OutputCard({ s, out }) {
   return <div className="card"><div className="card-head"><TerminalSquare size={16} /><h3>{t('Output: {cmd}', { cmd: cmdLabel(s, out.cmd) })}</h3></div><pre className="tiny gs-pre">{out.text}</pre></div>;
 }
 
-export function OverviewTab({ s, reload }) {
+export function OverviewTab({ s, reload, phase = null }) {
   const live = s.live;
   const steam = isSteam(s);
   const { busy, out, run } = useRun(s, reload);
-  const cmds = useApi(s.installed && !steam ? `/games/${s.id}/commands` : null, [s.id, s.installed], { live: false });
+  // Während Installation/Update scheitern die Pflege-Befehle – gesperrt mit Grund; nach dem Wechsel auf „Läuft“ neu lesen
+  const locked = isBusy(phase);
+  const why = busyReason(phase);
+  const cmds = useApi(s.installed && !steam ? `/games/${s.id}/commands` : null, [s.id, s.installed, locked], { live: false });
   const special = (cmds.data || []).filter((c) => !BASE_CMDS.includes(c.cmd) && !/^dev-/.test(c.cmd));
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card stat"><div className="k"><Users />{t('Players')}</div><div className="v">{live ? live.players : '–'}{live && <span className="muted gs-sub"> / {live.maxPlayers}</span>}</div><div className="s">{s.running ? (live ? (live.bots ? t('{n} bots', { n: live.bots }) : t('online')) : t('no query possible')) : t('Server stopped')}</div></div>
+        <div className="card stat"><div className="k"><Users />{t('Players')}</div><div className="v">{live ? live.players : '–'}{live && <span className="muted gs-sub"> / {live.maxPlayers}</span>}</div><div className="s">{locked ? stateLabel(s, null, phase) : s.running ? (live ? (live.bots ? t('{n} bots', { n: live.bots }) : t('online')) : t('no query possible')) : t('Server stopped')}</div></div>
         <div className="card stat"><div className="k"><MapIcon />{t('Map')}</div><div className="v ellipsis gs-v">{(live && live.map) || '–'}</div><div className="s">{live && live.password ? <><Lock size={11} /> {t('with password')}</> : live ? t('open') : ''}</div></div>
         <div className="card stat"><div className="k"><Tag />{t('Version')}</div><div className="v ellipsis gs-v">{(live && live.version) || '–'}</div><div className="s">{live && live.vac ? t('VAC protected') : ''}</div></div>
         <div className="card stat"><div className="k"><Network />{t('Ports')}</div><div className="v">{(s.ports || []).length || '–'}</div><div className="s">{live ? t('Query on {port}', { port: live.queryPort }) : <a href={`${BASE}/${s.id}/network`}>{t('show →')}</a>}</div></div>
@@ -55,8 +58,9 @@ export function OverviewTab({ s, reload }) {
       <div className="grid grid-2">
         <div className="stack">
           <div className="card">
-            <div className="card-head"><Gamepad2 size={16} /><h3>State</h3><div className="right"><StatusPill state={s.running ? 'running' : 'stopped'} /></div></div>
+            <div className="card-head"><Gamepad2 size={16} /><h3>State</h3><div className="right"><StatusPill state={stateOf(s, null, phase)} label={stateLabel(s, null, phase)} /></div></div>
             <div className="card-body stack">
+              {locked && <PhaseBar phase={phase} />}
               {live && live.name && <div className="mc-motd small ellipsis" title="Name in the server list">{live.name}</div>}
               <Connect s={s} />
               {steam && s.steam && s.steam.adminPassword && <div className="row-tight tiny"><KeyRound size={13} className="muted" /><span className="muted">{t('Admin/RCON password:')}</span><code>{s.steam.adminPassword}</code><button className="btn ghost xs icon" title="Copy" aria-label={t('Copy')} onClick={() => navigator.clipboard.writeText(s.steam.adminPassword).then(() => toast.success('Copied'))}><Copy /></button></div>}
@@ -64,18 +68,18 @@ export function OverviewTab({ s, reload }) {
             </div>
           </div>
           <div className="card">
-            <div className="card-head"><Wrench size={16} /><h3>Care</h3></div>
+            <div className="card-head"><Wrench size={16} /><h3>Care</h3>{locked && <div className="right"><InfoTip title={why} pop>{t('Updating, checking files, backups and mods need the finished game – they work again by themselves as soon as the server runs. Stopping works any time.')}</InfoTip></div>}</div>
             <div className="card-body row gs-wrap">
-              {!steam && <Btn icon={RefreshCw} busy={busy === 'check-update'} onClick={() => run('check-update')}>Check for updates</Btn>}
-              <Btn icon={Download} busy={busy === 'update'} onClick={() => run('update')}>Update</Btn>
-              <Btn icon={ShieldCheck} busy={busy === 'validate'} onClick={() => run('validate')}>Check files</Btn>
-              <Btn icon={Archive} busy={busy === 'backup'} onClick={() => run('backup')}>Backup</Btn>
-              {!steam && <Btn icon={RefreshCw} busy={busy === 'update-lgsm'} onClick={() => run('update-lgsm')}>Update LinuxGSM</Btn>}
+              {!steam && <Btn icon={RefreshCw} busy={busy === 'check-update'} disabled={locked} title={why || undefined} onClick={() => run('check-update')}>Check for updates</Btn>}
+              <Btn icon={Download} busy={busy === 'update'} disabled={locked} title={why || undefined} onClick={() => run('update')}>Update</Btn>
+              <Btn icon={ShieldCheck} busy={busy === 'validate'} disabled={locked} title={why || undefined} onClick={() => run('validate')}>Check files</Btn>
+              <Btn icon={Archive} busy={busy === 'backup'} disabled={locked} title={why || undefined} onClick={() => run('backup')}>Backup</Btn>
+              {!steam && <Btn icon={RefreshCw} busy={busy === 'update-lgsm'} disabled={locked} title={why || undefined} onClick={() => run('update-lgsm')}>Update LinuxGSM</Btn>}
             </div>
             {special.length > 0 && (
               <div className="card-body stack gs-top">
                 <div className="small bold">{t('Special for {game}', { game: s.gameName || s.name })}</div>
-                <div className="row gs-wrap">{special.map((c) => <Btn key={c.cmd} className="sm" icon={Wrench} busy={busy === c.cmd} title={c.desc} onClick={async () => { if (/wipe|remove|delete/.test(c.cmd) && !(await confirmDialog({ title: t('Run {cmd}?', { cmd: c.cmd }), text: c.desc, confirm: 'Run', danger: true }))) return; run(c.cmd); }}>{cmdLabel(s, c.cmd)}</Btn>)}</div>
+                <div className="row gs-wrap">{special.map((c) => <Btn key={c.cmd} className="sm" icon={Wrench} busy={busy === c.cmd} disabled={locked} title={why || c.desc} onClick={async () => { if (/wipe|remove|delete/.test(c.cmd) && !(await confirmDialog({ title: t('Run {cmd}?', { cmd: c.cmd }), text: c.desc, confirm: 'Run', danger: true }))) return; run(c.cmd); }}>{cmdLabel(s, c.cmd)}</Btn>)}</div>
                 <div className="tiny muted">LinuxGSM offers these commands exactly for this game – Hostwerk reads them by itself.</div>
               </div>
             )}
@@ -135,25 +139,31 @@ export function GuidesTab({ s }) {
   );
 }
 
-export function ConsoleTab({ s }) {
+export function ConsoleTab({ s, phase = null }) {
   const [cons, setCons] = useState(null);
+  const [raw, setRaw] = useState(false); // Rohausgabe statt zusammengefasster Fortschrittszeilen
+  const locked = isBusy(phase);
   const [cmd, setCmd] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState(null);
-  useEffect(() => { const load = () => get(`/games/${s.id}/console?n=400`).then((r) => setCons(r.lines)).catch(() => setCons([])); load(); const x = setInterval(() => { if (!document.hidden) load(); }, 4000); return () => clearInterval(x); }, [s.id]);
+  useEffect(() => { const load = () => get(`/games/${s.id}/console?n=400${raw ? '&raw=1' : ''}`).then((r) => setCons(r.lines)).catch(() => setCons([])); load(); const x = setInterval(() => { if (!document.hidden) load(); }, 4000); return () => clearInterval(x); }, [s.id, raw]);
   const send = async (e) => { e.preventDefault(); if (!cmd.trim()) return; setSending(true); try { const r = await post(`/games/${s.id}/send`, { command: cmd }); setReply(r && r.output ? r.output : null); setCmd(''); } catch (er) { toast.error(er.message); } setSending(false); };
   const steam = isSteam(s);
   return (
     <div className="card">
       <div className="card-head"><TerminalSquare size={16} /><h3>Console</h3><span className="small muted">{s.docker ? t('container output (every 4 s)') : steam ? t('server output (every 4 s)') : t('log/console (every 4 s)')}</span>
-        {!s.docker && !steam && <div className="right"><Btn className="xs" icon={TerminalSquare} onClick={() => { location.hash = `/terminal?cwd=${encodeURIComponent(s.dir)}&cmd=${encodeURIComponent(`./${s.script} console`)}`; }}>Live in the terminal (tmux)</Btn></div>}
+        <div className="right row-tight">
+          <Btn className="xs ghost" icon={FileText} aria-pressed={raw} title={raw ? t('Show progress lines summarized') : t('Show every line exactly as the server wrote it')} onClick={() => setRaw(!raw)}>{raw ? t('Summarized') : t('Raw output')}</Btn>
+          {!s.docker && !steam && <Btn className="xs" icon={TerminalSquare} onClick={() => { location.hash = `/terminal?cwd=${encodeURIComponent(s.dir)}&cmd=${encodeURIComponent(`./${s.script} console`)}`; }}>Live in the terminal (tmux)</Btn>}
+        </div>
       </div>
+      {locked && <div className="card-body"><PhaseBar phase={phase} /></div>}
       {!cons ? <Loading /> : <pre className="tiny console-pre gs-console">{cons.join('\n') || t('(no console output yet)')}</pre>}
       {reply && <pre className="tiny gs-reply">{reply}</pre>}
       {s.canSend ? (
         <form className="card-body row-tight gs-top" onSubmit={send}>
-          <input className="input mono grow" aria-label={t('Command to the server')} value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={steam ? t('Command to the server (RCON, e.g. status)') : t('Command to the server (e.g. say Hello)')} disabled={!s.running} />
-          <Btn className="primary" icon={Send} busy={sending} disabled={!s.running || !cmd.trim()} type="submit">Send</Btn>
+          <input className="input mono grow" aria-label={t('Command to the server')} value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={locked ? busyReason(phase) : steam ? t('Command to the server (RCON, e.g. status)') : t('Command to the server (e.g. say Hello)')} disabled={!s.running || locked} />
+          <Btn className="primary" icon={Send} busy={sending} disabled={!s.running || locked || !cmd.trim()} title={locked ? busyReason(phase) : undefined} type="submit">Send</Btn>
         </form>
       ) : <div className="card-body tiny muted gs-top">{steam ? t('This game takes no console commands through Hostwerk – use its own admin tools or config files.') : t('This game takes no commands through LinuxGSM – use “Live in the terminal” for live input.')}</div>}
     </div>
@@ -241,7 +251,7 @@ export function ScheduleTab({ s }) {
   );
 }
 
-export function BackupsTab({ s, reload }) {
+export function BackupsTab({ s, reload, phase = null }) {
   const list = useApi(`/games/${s.id}/backups`, [s.id], { live: false, poll: true });
   const { busy, run } = useRun(s, () => { reload(); list.reload(); });
   const steam = isSteam(s);
@@ -251,7 +261,7 @@ export function BackupsTab({ s, reload }) {
   };
   return (
     <div className="card">
-      <div className="card-head"><Archive size={16} /><h3>Backups</h3><span className="small muted">{steam ? t('of {dir} in backups/', { dir: s.saves || '–' }) : t('backups/ in the server folder')}</span><div className="right"><Btn className="sm primary" icon={Archive} busy={busy === 'backup'} onClick={() => run('backup')}>Back up now</Btn></div></div>
+      <div className="card-head"><Archive size={16} /><h3>Backups</h3><span className="small muted">{steam ? t('of {dir} in backups/', { dir: s.saves || '–' }) : t('backups/ in the server folder')}</span><div className="right"><Btn className="sm primary" icon={Archive} busy={busy === 'backup'} disabled={isBusy(phase)} title={busyReason(phase) || undefined} onClick={() => run('backup')}>Back up now</Btn></div></div>
       {s.docker ? <div className="card-body small muted">In Docker mode backups are in the container's volume (Files tab → backups).</div> : !list.data ? <Loading /> : list.data.length === 0 ? <div className="card-body small muted">{steam ? t('No backups yet. Plan a daily backup under Settings → Schedule.') : t('No backups yet. LinuxGSM backs up the whole server (and stops it briefly for that).')}</div> : list.data.map((b) => (
         <div key={b.file} className="list-item"><Archive size={15} className="muted" /><div className="grow small"><b className="mono">{b.file}</b><div className="tiny muted">{fmtDate(b.time)} · {fmtBytes(b.size)}</div></div>
           {steam && /\.zip$/.test(b.file) && <Btn className="xs ghost" icon={RotateCcw} disabled={s.running} title={s.running ? t('Stop the server first') : undefined} onClick={() => restore(b)}>Restore</Btn>}
@@ -261,13 +271,14 @@ export function BackupsTab({ s, reload }) {
   );
 }
 
-export function CommandsTab({ s, reload }) {
-  const cmds = useApi(`/games/${s.id}/commands`, [s.id], { live: false });
+export function CommandsTab({ s, reload, phase = null }) {
+  const locked = isBusy(phase);
+  const cmds = useApi(`/games/${s.id}/commands`, [s.id, locked], { live: false });
   const { busy, out, run } = useRun(s, reload);
   return (
     <div className="stack">
-      <div className="card"><div className="card-head"><Wrench size={16} /><h3>LinuxGSM commands</h3><span className="small muted mono">{`./${s.script} <command>`}</span></div>
-        {(cmds.data || []).filter((c) => !/^(console|debug|install|auto-install|skeleton|sponsor|donate)$/.test(c.cmd) && !/^dev-/.test(c.cmd)).map((c) => <div key={c.cmd} className="list-item"><code className="small">{c.cmd}</code>{c.short && <span className="tiny muted mono">{c.short}</span>}<div className="grow small">{s.commands[c.cmd] ? cmdLabel(s, c.cmd) : c.desc}{s.commands[c.cmd] && c.desc ? <span className="tiny muted"> – {c.desc}</span> : null}</div><Btn className="xs" busy={busy === c.cmd} disabled={!!busy} onClick={() => run(c.cmd)}>Run</Btn></div>)}
+      <div className="card"><div className="card-head"><Wrench size={16} /><h3>LinuxGSM commands</h3><span className="small muted mono">{`./${s.script} <command>`}</span>{locked && <div className="right"><InfoTip title={busyReason(phase)} pop>{t('LinuxGSM commands need the finished game – they work again by themselves as soon as the server runs. Stopping works any time.')}</InfoTip></div>}</div>
+        {(cmds.data || []).filter((c) => !/^(console|debug|install|auto-install|skeleton|sponsor|donate)$/.test(c.cmd) && !/^dev-/.test(c.cmd)).map((c) => <div key={c.cmd} className="list-item"><code className="small">{c.cmd}</code>{c.short && <span className="tiny muted mono">{c.short}</span>}<div className="grow small">{s.commands[c.cmd] ? cmdLabel(s, c.cmd) : c.desc}{s.commands[c.cmd] && c.desc ? <span className="tiny muted"> – {c.desc}</span> : null}</div><Btn className="xs" busy={busy === c.cmd} disabled={!!busy || (locked && !/^(start|stop|monitor)$/.test(c.cmd))} title={locked && !/^(start|stop|monitor)$/.test(c.cmd) ? busyReason(phase) : undefined} aria-label={`${t('Run')}: ${c.cmd}`} onClick={() => run(c.cmd)}>Run</Btn></div>)}
         <div className="card-body tiny muted">{t('The list comes straight from LinuxGSM for this game.')} <button className="link-btn tiny" onClick={() => get(`/games/${s.id}/commands?fresh=1`).then(() => cmds.reload())}>{t('Read again')}</button></div>
       </div>
       <OutputCard s={s} out={out} />

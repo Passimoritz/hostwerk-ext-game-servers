@@ -17,7 +17,9 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 - **Picking a game in two steps:** search, filters (ready-made start, without Docker, popular) and big cards with the game's picture – then name, a free port, where the files go and native/Docker; memory hint for popular games
 - **Game pictures without upkeep:** looked up by the game (Steam CDN, store search, LinuxGSM icon), fetched once and kept in Hostwerk's image cache, also offline; initials when there is none
 - **Import existing servers:** Steam libraries, SteamCMD folders, LinuxGSM instances (Linux), LinuxGSM Docker containers and a folder of your choice – take them over where they are or as a copy, with port, players and start line; searching only reads
-- Console, send commands, player list, map and version through the Steam query (A2S)
+- **Honest state:** “Installing” / “Updating” / “Starting” instead of “Running” while the container is still downloading the game – with a bar (“Downloading: 5.1 GB of 6.4 GB – 20 MB/s, about 2 min. left”) in the header, the state card, the server list, Hostwerk's overview tile and the task window; recognised for every game from SteamCMD's progress, LinuxGSM's sections and status lines, the image's health check and the Steam query, with a time limit so nothing stays “installing” forever
+- Care buttons that would fail during the installation are locked with the reason (ⓘ); stopping always works; errors name the cause (still installing, no disk space, Steam unreachable, login needed …) instead of “code 1”
+- Console, send commands, player list, map and version through the Steam query (A2S); SteamCMD progress lines summarized in the console (raw output one click away)
 - Every LinuxGSM command – including the game-specific ones the script offers (e.g. wipe for Rust)
 - Updates (automatic when nobody plays), backups, monitor with restart after a crash
 - Game saves in Hostwerk’s backup centre (restore and delete there, the current state is backed up first) and in the off-site backup (“Data from extensions”) – Hostwerk 2.12 or newer

@@ -17,7 +17,9 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 - **Spiel wählen in zwei Schritten:** Suche, Filter (fertiger Start, ohne Docker, beliebt) und große Karten mit Spielbild – danach Name, freier Port, Speicherort und direkt/Docker; Arbeitsspeicher-Hinweis je beliebtem Spiel
 - **Spielbilder ohne Wartung:** über das Spiel gesucht (Steam-CDN, Shop-Suche, LinuxGSM-Symbol), einmal geholt und in Hostwerks Bild-Cache gehalten, auch offline; ohne Bild Anfangsbuchstaben
 - **Import vorhandener Server:** Steam-Bibliotheken, SteamCMD-Ordner, LinuxGSM-Instanzen (Linux), LinuxGSM-Docker-Container und ein Ordner deiner Wahl – am bisherigen Ort oder als Kopie übernehmen, mit Port, Spielerzahl und Startzeile; die Suche liest nur
-- Konsole, Befehle senden, Spielerliste, Karte und Version per Steam-Abfrage (A2S)
+- **Ehrlicher Zustand:** „Wird installiert“ / „Wird aktualisiert“ / „Startet“ statt „Läuft“, solange der Container das Spiel noch lädt – mit Balken („Herunterladen: 5,1 GB von 6,4 GB – 20 MB/s, noch etwa 2 Min.“) im Kopf, in der Zustand-Karte, in der Server-Liste, in Hostwerks Übersichtskachel und im Aufgaben-Fenster; für jedes Spiel erkannt an SteamCMDs Fortschritt, LinuxGSMs Abschnitten und Statuszeilen, dem Healthcheck des Images und der Steam-Abfrage, mit Zeitlimit, damit nichts ewig „installiert“
+- Pflege-Knöpfe, die während der Installation scheitern würden, sind mit Grund gesperrt (ⓘ); Stoppen geht immer; Fehler nennen die Ursache (Installation läuft noch, kein Speicherplatz, Steam nicht erreichbar, Anmeldung nötig …) statt „Code 1“
+- Konsole, Befehle senden, Spielerliste, Karte und Version per Steam-Abfrage (A2S); SteamCMD-Fortschrittszeilen in der Konsole zusammengefasst (Rohausgabe einen Klick entfernt)
 - Alle LinuxGSM-Befehle – auch die spielspezifischen, die das Skript anbietet (z. B. wipe bei Rust)
 - Updates (automatisch, wenn niemand spielt), Backups, Überwachen mit Neustart nach Absturz
 - Spielstände in Hostwerks Sicherungs-Zentrale (dort zurückspielen und löschen, der aktuelle Stand wird vorher gesichert) und in der externen Sicherung („Daten aus Erweiterungen“) – ab Hostwerk 2.12

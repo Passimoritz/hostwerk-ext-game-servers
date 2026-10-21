@@ -5,7 +5,7 @@ import { Btn, Tabs, Seg, Empty, Loading, Callout, StatusPill, Progress, toast, c
 import { serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart, useAreaTabs } from '@hostwerk/kit';
 import { FileBrowser } from '@hostwerk/files';
 import { t } from '@hostwerk/i18n';
-import { BASE, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable } from './common';
+import { BASE, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable, phaseOf, isBusy, PhaseBar, PHASE_LABEL } from './common';
 import { CreateDialog, QuickStart, SetupSteps } from './setup';
 import { BackupsTab, CommandsTab, ConsoleTab, GuidesCard, GuidesTab, NetworkTab, OverviewTab, PlayersTab, ScheduleTab, useRun, WorkshopTab } from './tabs';
 import { LgsmConfig, SettingsTab, SteamConfig } from './settings';
@@ -54,12 +54,15 @@ function InstallView({ s, job, inner, reload }) {
 function Server({ s, tab, reload }) {
   const job = useStore((st) => isInstalling(st.jobs, s.id));
   const inner = useStore((st) => innerJob(st.jobs, s.id));
+  const jobs = useStore((st) => st.jobs);
+  const phase = phaseOf(s, jobs); // installiert/aktualisiert/startet gerade – auch wenn der Container schon läuft
+  const busy = isBusy(phase);
   const contrib = useExtContrib('game'); // tabs from other extensions
   const steam = isSteam(s);
   const groups = [
     { id: 'overview', label: t('Overview'), icon: LayoutDashboard, subs: [['overview', t('Overview'), LayoutDashboard], ['network', t('Network'), Network], ['guides', t('Guides'), BookOpen]] },
     { id: 'console', label: t('Console'), icon: TerminalSquare, subs: steam ? [['console']] : [['console', t('Console'), TerminalSquare], ['commands', t('All commands'), Wrench]] },
-    { id: 'players', label: t('Players'), icon: Users, badge: s.live ? s.live.players : undefined, subs: [['players']], disabled: !s.running, title: s.running ? undefined : t('Only while the server runs – the player list comes live from the server') },
+    { id: 'players', label: t('Players'), icon: Users, badge: s.live ? s.live.players : undefined, subs: [['players']], disabled: !s.running || busy, title: busy ? t('Only once the server runs') : s.running ? undefined : t('Only while the server runs – the player list comes live from the server') },
     { id: 'settings', label: t('Settings'), icon: Settings2, subs: [['settings', t('General'), SlidersHorizontal], ['config', steam ? t('Config files') : t('Config file'), FileText], ['schedule', t('Schedule'), CalendarClock], ...(steam ? [['workshop', t('Workshop'), Boxes]] : [])] },
     { id: 'backups', label: t('Backups'), icon: Archive, subs: [['backups']] },
     { id: 'files', label: t('Files'), icon: FolderOpen, subs: [['files']] },
@@ -74,28 +77,29 @@ function Server({ s, tab, reload }) {
       <div className="page-head">
         <div>
           <div className="crumbs small gs-mb"><a href={BASE}>{t('Game servers')}</a><span>/</span>{s.name}</div>
-          <h1><GameIcon s={s} className="ico" size={30} /> {s.name} <FavButton kind="game" id={s.id} /> <StatusPill state={stateOf(s, job)} label={stateLabel(s, job)} /></h1>
+          <h1><GameIcon s={s} className="ico" size={30} /> {s.name} <FavButton kind="game" id={s.id} /> <StatusPill state={stateOf(s, job, phase)} label={stateLabel(s, job, phase)} /></h1>
           <p>{s.gameName || s.script}{s.live && s.live.version ? ` ${s.live.version}` : ''} · {methodLabel(s)}{s.address ? ` · ${t('Port {port}', { port: s.address.port })}` : ''}{s.live ? ` · ${t('{n}/{max} players', { n: s.live.players, max: s.live.maxPlayers })}` : ''}</p>
         </div>
         <div className="actions">
           {isElectron && !s.docker && <Btn className="ghost" icon={ExternalLink} onClick={() => post('/app/open-path', { path: s.dir })}>Folder</Btn>}
-          {s.installed && <ServiceButtons base={`/games/${s.id}`} state={s.running ? 'running' : 'stopped'} onError={(e) => toast.error(e.message)} />}
+          {s.installed && <ServiceButtons base={`/games/${s.id}`} state={s.running ? 'running' : 'stopped'} restart={!busy} onError={(e) => toast.error(e.message)} />}
         </div>
       </div>
+      {s.installed && busy && <div className="card gs-phase-card"><div className="card-body"><PhaseBar phase={phase} /></div></div>}
       {!s.installed ? <InstallView s={s} job={job} inner={inner} reload={reload} /> : <>
         <Tabs tabs={groups.map(({ subs, ...g }) => g)} value={group.id} onChange={(g) => go((groups.find((x) => x.id === g) || groups[0]).subs[0][0])} />
         {group.subs.length > 1 && <div className="sub-tabs"><Seg value={cur} onChange={go} options={group.subs.map(([sid, label, icon]) => ({ id: sid, label, icon }))} /></div>}
-        {cur === 'overview' && <OverviewTab s={s} reload={reload} />}
+        {cur === 'overview' && <OverviewTab s={s} reload={reload} phase={phase} />}
         {cur === 'network' && <NetworkTab s={s} />}
         {cur === 'guides' && <GuidesTab s={s} />}
-        {cur === 'console' && <ConsoleTab s={s} />}
-        {cur === 'commands' && <CommandsTab s={s} reload={reload} />}
+        {cur === 'console' && <ConsoleTab s={s} phase={phase} />}
+        {cur === 'commands' && <CommandsTab s={s} reload={reload} phase={phase} />}
         {cur === 'players' && <PlayersTab s={s} />}
         {cur === 'settings' && <SettingsTab s={s} reload={reload} />}
         {cur === 'config' && (steam ? <SteamConfig s={s} reload={reload} /> : <LgsmConfig s={s} />)}
         {cur === 'schedule' && <ScheduleTab s={s} />}
         {cur === 'workshop' && <WorkshopTab s={s} />}
-        {cur === 'backups' && <BackupsTab s={s} reload={reload} />}
+        {cur === 'backups' && <BackupsTab s={s} reload={reload} phase={phase} />}
         {cur === 'files' && <div className="card gs-files">{s.docker && <div className="info-line"><Info size={13} /><span>{t('In Docker mode the files are in the volume of the Hostwerk Docker engine – the engine has to run.')}</span></div>}<FileBrowser root={`game:${s.id}`} /></div>}
         {contrib.tabs.filter((x) => x.key === cur).map((x) => <ExtTabView key={x.key} item={x} kind="game" id={s.id} />)}
       </>}
@@ -105,14 +109,15 @@ function Server({ s, tab, reload }) {
 
 /* ---------------------------------------------------------------- every game server */
 
-function GameCard({ s, installing, reload }) {
+function GameCard({ s, installing, phase, reload }) {
   const live = s.live;
-  const state = stateOf(s, installing);
+  const state = stateOf(s, installing, phase);
+  const busy = isBusy(phase);
   return (
     <div className={`card svc-card mc-card ${s.running ? 'running' : 'stopped'}`} onClick={() => goServer(s.id)} onContextMenu={(e) => serviceMenu(e, {
       icon: { kind: 'game', id: s.id }, name: s.name, state: s.installed ? state : 'missing', base: `/games/${s.id}`, href: `${BASE}/${s.id}`, dir: s.docker ? null : s.dir,
       copy: s.address ? [[t('Copy address'), s.address.local]] : [],
-      extra: s.installed ? [{ label: t('Update'), icon: Download, onClick: () => post(`/games/${s.id}/update`).catch((er) => toast.error(er.message)) }, { label: t('Backup'), icon: Archive, onClick: () => post(`/games/${s.id}/backup`).catch((er) => toast.error(er.message)) }, { label: t('Settings'), icon: Settings2, onClick: () => goServer(s.id, 'settings') }] : [],
+      extra: s.installed && !busy ? [{ label: t('Update'), icon: Download, onClick: () => post(`/games/${s.id}/update`).catch((er) => toast.error(er.message)) }, { label: t('Backup'), icon: Archive, onClick: () => post(`/games/${s.id}/backup`).catch((er) => toast.error(er.message)) }, { label: t('Settings'), icon: Settings2, onClick: () => goServer(s.id, 'settings') }] : [],
       remove: async () => { if (await confirmDialog({ title: t('Remove “{name}”?', { name: s.name }), text: 'Stop the server and remove it from Hostwerk (files stay).', confirm: 'Remove', danger: true })) { await del(`/games/${s.id}`); reload(); } },
     })}>
       <div className="svc-top">
@@ -122,7 +127,7 @@ function GameCard({ s, installing, reload }) {
           <div className="svc-title ellipsis">{s.name}</div>
           <div className="small muted ellipsis"><b>{s.gameName || s.script}</b>{live && live.version ? ` ${live.version}` : ''} · {methodLabel(s)}</div>
         </div>
-        <StatusPill state={state} label={stateLabel(s, installing)} />
+        <StatusPill state={state} label={stateLabel(s, installing, phase)} />
       </div>
       {live && live.name && <div className="mc-motd small ellipsis">{live.name}</div>}
       <div className="svc-meta">
@@ -130,8 +135,9 @@ function GameCard({ s, installing, reload }) {
         <div><div className="k">{t('Players')}</div><div className="v">{live ? `${live.players} / ${live.maxPlayers}` : '–'}</div></div>
         {live && live.map && <div><div className="k">{t('Map')}</div><div className="v ellipsis small">{live.map}</div></div>}
       </div>
+      {s.installed && busy && <PhaseBar phase={phase} compact />}
       <div className="svc-actions" onClick={(e) => e.stopPropagation()}>
-        {s.installed ? <ServiceButtons base={`/games/${s.id}`} state={s.running ? 'running' : 'stopped'} size="sm" onError={(e) => toast.error(e.message)} />
+        {s.installed ? <ServiceButtons base={`/games/${s.id}`} state={s.running ? 'running' : 'stopped'} size="sm" restart={!busy} onError={(e) => toast.error(e.message)} />
           : installing ? <span className="small muted"><span className="spinner gs-spin" />{installing.text || t('installing …')}</span>
           : <Btn className="sm primary" icon={Download} onClick={() => post(`/games/${s.id}/auto-install`).then(reload).catch((er) => toast.error(er.message))}>Continue installation</Btn>}
       </div>
@@ -188,7 +194,7 @@ export function GamesPage({ path = [], ext }) {
         </div>
       ) : (
         <div className="grid grid-auto">
-          {favSort('game', servers).map((s) => <GameCard key={s.id} s={s} installing={isInstalling(jobs, s.id)} reload={d.reload} />)}
+          {favSort('game', servers).map((s) => <GameCard key={s.id} s={s} installing={isInstalling(jobs, s.id)} phase={phaseOf(s, jobs)} reload={d.reload} />)}
           <AddTile onClick={() => setCreate(true)} title={t('Another game server')} text={t('Every Steam server tool and more than 100 LinuxGSM games')} chips={POPULAR.map(([label, color]) => ({ label, color: readable(color) }))} />
         </div>
       )}
@@ -204,7 +210,7 @@ export default {
   nav: {
     tip: (o) => {
       const list = (o && Array.isArray(o.games)) ? o.games : [];
-      return { text: t('Game servers through SteamCMD or LinuxGSM – on this PC or in Docker containers.'), lines: list.map((g) => ({ name: g.name, state: g.running ? 'running' : 'stopped', text: g.game || '' })) };
+      return { text: t('Game servers through SteamCMD or LinuxGSM – on this PC or in Docker containers.'), lines: list.map((g) => ({ name: g.name, state: isBusy(g.phase) ? 'starting' : g.running ? 'running' : 'stopped', text: isBusy(g.phase) ? (g.phase.text || t(PHASE_LABEL[g.phase.state])) : g.game || '' })) };
     },
   },
 };

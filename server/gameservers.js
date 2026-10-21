@@ -23,6 +23,7 @@ const SG = require('./steamgames');
 const IM = require('./importer');
 const GI = require('./gameinfo');
 const { GameArt, gameNameOf } = require('./gameart');
+const PH = require('./phase');
 const { parseShellVars } = IM;
 
 // Hostwerk's building blocks – bound in the constructor (see server/index.js)
@@ -122,6 +123,8 @@ class GameServers {
     this.art = new GameArt({ dataDir: this.dataDir, imageCache: this.ctx.imageCache, offline: () => { try { return core('download').isOffline() === true; } catch { return false; } } });
     this.lastScan = new Map(); // last import search: key → found server (with the details that stay on the server)
     this.seen = new Set();
+    this.phases = new Map(); // id → { startedAt, tracker, result } – was ein laufender LinuxGSM-Container gerade tut (phase.js)
+    this.execUsers = new Map(); // Container → Nutzer, als der LinuxGSM darin läuft
     this.timers = [];
     if (!process.env.HW_TEST) {
       this.timers.push(setInterval(() => this.monitorTick().catch(() => {}), IS_LINUX ? 5 * 60000 : 60000));
@@ -274,7 +277,7 @@ class GameServers {
   lgsmCreateArgs(s) {
     const image = `gameservermanagers/gameserver:${s.game.replace(/server$/, '')}`;
     const pub = (s.ports || []).flatMap((p) => (/tcp/i.test(p.proto) && /udp/i.test(p.proto) ? ['tcp', 'udp'] : [String(p.proto || 'tcp').toLowerCase()]).flatMap((pr) => ['-p', `${p.port}:${p.port}/${pr}`]));
-    return ['create', '--name', this.cname(s), '--restart', 'no', '-v', `${this.lgsmVolume(s)}:/data`, '-e', 'UPDATE_ON_START=1', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, ...this.steam.limitArgs(s.limits), image];
+    return ['create', '--name', this.cname(s), '--restart', 'no', '-v', `${this.lgsmVolume(s)}:/data`, '-e', 'UPDATE_ON_START=true', '-e', `LGSM_GAMESERVER=${s.game}`, ...pub, ...this.steam.limitArgs(s.limits), image];
   }
   lgsmSpecHash(s) { return crypto.createHash('sha1').update(JSON.stringify(this.lgsmCreateArgs(s))).digest('hex').slice(0, 16); }
   /** Ports or limits changed → create the container anew (data stays in the volume). Older containers without a hash are kept. */
@@ -286,6 +289,33 @@ class GameServers {
     await this.dx(this.lgsmCreateArgs(s), { timeout: 120000 });
     s.specHash = hash; this.ctx.settings.save();
     return true;
+  }
+  /*
+   * LinuxGSM im Container IMMER als dessen Nicht-root-Nutzer: Das offizielle Image läuft als root und wechselt selbst per
+   * gosu zum Nutzer „linuxgsm“. Ein „docker exec“ ohne -u landet als root – LinuxGSM bricht dann JEDEN Befehl mit
+   * „CORE: FAIL: <server> attempted to run as root.“ ab (Code 1: Aktualisieren, Details, Backup, Konsole, Mods …).
+   * Der Nutzer wird aus dem Container gelesen (Config.User, sonst USER aus der Umgebung des Images), Rückfall „linuxgsm“.
+   */
+  async execUser(s) {
+    const c = this.cname(s);
+    if (this.execUsers.has(c)) return this.execUsers.get(c);
+    const r = await this.dx(['inspect', '--format', '{{json .Config}}', c], { ok: true, timeout: 15000 });
+    let user = 'linuxgsm';
+    try { const cfg = JSON.parse(String(r.stdout || '').trim() || '{}'); user = execUserOf(cfg); } catch { /* Rückfall */ }
+    if (r.code === 0) this.execUsers.set(c, user);
+    return user;
+  }
+  /** ./<server> <args> im Container – überall derselbe Weg (Befehle, Details, Befehlsliste, Konsole, Stoppen). */
+  async lgsmExec(s, args = [], { timeout = 60000 } = {}) {
+    const c = this.cname(s);
+    const user = await this.execUser(s);
+    let r = await this.dx(['exec', '-u', user, c, `./${s.game}`, ...args], { ok: true, timeout });
+    // Sicherheitsnetz: meldet LinuxGSM trotzdem „als root“ (eigenes Image, anderer USER), noch einmal als linuxgsm
+    if (user !== 'linuxgsm' && /attempted to run as root/i.test(`${r.stdout}${r.stderr}`)) {
+      this.execUsers.set(c, 'linuxgsm');
+      r = await this.dx(['exec', '-u', 'linuxgsm', c, `./${s.game}`, ...args], { ok: true, timeout });
+    }
+    return r;
   }
   env() { return { ...process.env, LGSM_GITHUBUSER: 'GameServerManagers', TERM: 'xterm', LANG: 'C.UTF-8', HOME: process.env.HOME || os.homedir(), CI: '1' }; }
 
@@ -388,7 +418,8 @@ class GameServers {
     if (!fresh && s.cmds && Date.now() - s.cmds.at < 6 * 3600e3) return s.cmds.list;
     let out = '';
     try {
-      if (this.isDocker(s)) { const r = await this.dx(['exec', this.cname(s), `./${s.game}`], { ok: true, timeout: 30000 }); out = r.stdout + r.stderr; }
+      // Während Installation/Update gibt es das Skript evtl. noch nicht – dann die bekannte Liste, nichts merken
+      if (this.isDocker(s)) { if (!PH.isBusy(this.phaseNow(s))) { const r = await this.lgsmExec(s, [], { timeout: 30000 }); out = r.stdout + r.stderr; } }
       else if (IS_LINUX && fs.existsSync(this.script(s))) { const r = await core('util').exec(this.script(s), [], { cwd: this.dir(s), env: this.env(), timeout: 30000 }); out = (r.stdout || '') + (r.stderr || ''); }
     } catch { /* server not running / not installed */ }
     const list = parseCommands(out);
@@ -402,8 +433,24 @@ class GameServers {
   }
   label(command) { return COMMANDS[command] ? T(COMMANDS[command]) : command; }
 
+  /**
+   * Während Installation, Update oder Start scheitern Pflege-Befehle (Aktualisieren, Dateien prüfen, Backup, Mods …) –
+   * LinuxGSM meldet dann nur „Code 1“. Stattdessen gleich eine klare Antwort; Starten, Stoppen und Erzwingen gehen immer.
+   */
+  assertReady(s, command) {
+    if (PH.ALLOWED_WHILE_BUSY.test(command)) return;
+    const p = this.phaseNow(s);
+    if (!PH.isBusy(p)) return;
+    const v = { name: s.name, what: command === 'send' ? T('Console commands') : this.label(command) };
+    const msg = p.state === 'installing' ? T('“{name}” is still being installed – “{what}” works once the installation is done.', v)
+      : p.state === 'updating' ? T('“{name}” is being updated right now – “{what}” works once the update is done.', v)
+        : T('“{name}” is still starting – try “{what}” again in a moment.', v);
+    throw Object.assign(new Error(msg), { status: 409, code: 'GAME_BUSY', phase: p.state });
+  }
+
   run(id, command, extra = []) {
     const s = this.get(id);
+    this.assertReady(s, command);
     if (this.isSteam(s)) return this.steam.run(s, command);
     if (this.isDocker(s)) return this.runDocker(s, command, extra);
     this.requireLinux();
@@ -419,7 +466,7 @@ class GameServers {
       await this.refresh(s);
       this.broadcast({ type: 'games' });
       const out = r.out.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      if (r.code !== 0 && r.code !== 'hang' && !/details|check-update|monitor/.test(command)) throw Object.assign(new Error(T('{what} reports code {code}: {msg}', { what: this.label(command), code: r.code, msg: out.trim().split('\n').filter(Boolean).pop() || '' })), { output: out.slice(-3000) });
+      if (r.code !== 0 && r.code !== 'hang' && !/details|check-update|monitor/.test(command)) throw Object.assign(new Error(this.failText(command, r.code, out)), { output: out.slice(-3000) });
       return { ok: true, output: out.slice(-6000), text: out.trim().split('\n').filter(Boolean).pop() || 'ok' };
     }, { key: `game-${id}-${command}` });
   }
@@ -444,7 +491,7 @@ class GameServers {
       }
       if (command === 'restart' && s.specHash && s.specHash !== this.lgsmSpecHash(s)) {
         // Ports or limits changed: stop, create the container anew, start
-        await this.dx(['exec', c, `./${s.game}`, 'stop'], { ok: true, timeout: 120000 });
+        await this.lgsmExec(s, ['stop'], { timeout: 120000 });
         await this.dx(['stop', '-t', '30', c], { ok: true, timeout: 90000 });
         await this.ensureLgsmContainer(s);
         await this.dx(['start', c]); await this.refresh(s); this.broadcast({ type: 'games' });
@@ -452,20 +499,26 @@ class GameServers {
       }
       if (command === 'start') { await this.ensureLgsmContainer(s); await this.dx(['start', c]); await this.refresh(s); this.broadcast({ type: 'games' }); return { ok: true, text: T('Container started (LinuxGSM starts the server inside).') }; }
       if (command === 'stop') {
-        await this.dx(['exec', c, `./${s.game}`, 'stop'], { ok: true, timeout: 120000 });
+        await this.lgsmExec(s, ['stop'], { timeout: 120000 });
         await this.dx(['stop', '-t', '30', c], { timeout: 90000 });
         // Only report "stopped" once the container is really off – otherwise say so honestly and offer to force it
         if (await this.running(s).catch(() => false)) throw Object.assign(new Error(T('The server is still running – “Force” ends it right away.')), { canKill: true });
         await this.refresh(s); this.broadcast({ type: 'games' });
         return { ok: true, text: T('Stopped.') };
       }
-      const r = await this.dx(['exec', c, `./${s.game}`, command, ...safeExtra], { ok: true, timeout: /update|install|validate|backup/.test(command) ? 30 * 60000 : 5 * 60000 });
+      const r = await this.lgsmExec(s, [command, ...safeExtra], { timeout: /update|install|validate|backup/.test(command) ? 30 * 60000 : 5 * 60000 });
       const out = (r.stdout + '\n' + r.stderr).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       for (const l of out.split('\n').filter(Boolean).slice(-60)) job.log(l);
       await this.refresh(s); this.broadcast({ type: 'games' });
-      if (r.code !== 0 && !/details|check-update|monitor/.test(command)) throw Object.assign(new Error(T('{what} reports code {code}', { what: this.label(command), code: r.code })), { output: out.slice(-3000) });
+      if (r.code !== 0 && !/details|check-update|monitor/.test(command)) throw Object.assign(new Error(this.failText(command, r.code, out)), { output: out.slice(-3000) });
       return { ok: true, output: out.slice(-6000), text: out.trim().split('\n').filter(Boolean).pop() || 'ok' };
     }, { key: `game-${s.id}-${command}` });
+  }
+
+  /** „Aktualisieren hat nicht geklappt: Nicht genug Speicherplatz.“ – Ursache aus der Ausgabe statt nur „Code 1“ */
+  failText(command, code, out) {
+    const why = PH.explainFailure(out, { T });
+    return why ? T('{what} did not work: {why}', { what: this.label(command), why }) : T('{what} reports code {code}', { what: this.label(command), code });
   }
 
   /* ---------- state ---------- */
@@ -478,10 +531,91 @@ class GameServers {
   async running(s) {
     if (this.isSteam(s)) return this.steam.running(s);
     if (this.isDocker(s)) await this.fixRestartPolicy(s).catch(() => {});
-    if (this.isDocker(s)) { const r = await this.dx(['inspect', '--format', '{{.State.Running}}', this.cname(s)], { ok: true, timeout: 15000 }); return r.stdout.trim() === 'true'; }
+    if (this.isDocker(s)) {
+      const st = await this.dockerState(s);
+      if (st.running) await this.trackDocker(s, st).catch(() => {});
+      else this.phases.delete(s.id);
+      return st.running;
+    }
     // LinuxGSM starts the game in a tmux session named like the script
     const r = await core('util').exec('tmux', ['has-session', '-t', s.game], { env: this.env() });
     return r.code === 0;
+  }
+  /** Läuft der Container, seit wann, und was sagt der Healthcheck des Images (LinuxGSM „monitor“)? */
+  async dockerState(s) {
+    const r = await this.dx(['inspect', '--format', '{{.State.Running}}|{{.State.StartedAt}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}', this.cname(s)], { ok: true, timeout: 15000 });
+    const [run, startedAt, health] = String(r.stdout || '').trim().split('|');
+    return { running: r.code === 0 && run === 'true', startedAt: startedAt || null, health: health || null };
+  }
+  /*
+   * Was der laufende Container gerade tut – aus seiner eigenen Ausgabe (docker logs --timestamps, nur das Neue seit dem
+   * letzten Mal). Solange er installiert/aktualisiert/startet alle 4 s, danach jede Minute (Update-Prüfung des Images).
+   * Wird er beschäftigt erkannt, läuft eine Aufgabe „Wird installiert“ mit Balken im Aufgaben-Fenster mit.
+   */
+  async trackDocker(s, st, { force = false } = {}) {
+    let p = this.phases.get(s.id);
+    if (!p || p.startedAt !== st.startedAt) {
+      const started = Date.parse(st.startedAt || '') || Date.now();
+      p = { startedAt: st.startedAt, at: 0, reading: null, result: null, tracker: new PH.PhaseTracker({ startedAt: started, installedBefore: !!s.readyAt, T, lang: typeof H.lang === 'function' ? H.lang() : 'de' }) };
+      this.phases.set(s.id, p);
+    }
+    const now = Date.now();
+    if ((force || now - p.at >= (p.tracker.phase === 'ready' ? 60000 : 4000)) && !p.reading) {
+      p.reading = (async () => {
+        const since = p.tracker.lastTs || st.startedAt;
+        const r = await this.dx(['logs', '--timestamps', ...(since ? ['--since', since] : []), '--tail', p.at ? '2000' : '4000', this.cname(s)], { ok: true, timeout: 20000 });
+        if (r.code === 0) p.tracker.feed(PH.parseDockerLogs(`${r.stdout || ''}\n${r.stderr || ''}`), now);
+        p.at = Date.now();
+      })().catch(() => {}).finally(() => { p.reading = null; });
+    }
+    if (p.reading) await p.reading;
+    const before = p.result ? p.result.state : null;
+    const r = p.tracker.result({ now: Date.now(), health: st.health });
+    p.result = r;
+    if (r.state === 'ready' && !r.fallback && !s.readyAt) { s.readyAt = Date.now(); this.ctx.settings.save(); }
+    if (before !== r.state) {
+      this.broadcast({ type: 'games' });
+      if (r.state === 'ready' && (before === 'installing' || before === 'updating' || before === 'starting') && !r.fallback) this.broadcast({ type: 'toast', kind: 'success', text: T('{name} is ready – players can join.', { name: s.name }) });
+    }
+    if (PH.isBusy(r)) this.watchPhase(s);
+    return r;
+  }
+  /*
+   * Aufgabe im Aufgaben-Fenster, solange der Container installiert/aktualisiert/startet: Balken mit Größe, Tempo und
+   * Restzeit. „Abbrechen“ stoppt den Server (die Installation läuft beim nächsten Start weiter). Endet von selbst.
+   */
+  watchPhase(s) {
+    if (process.env.HW_TEST && !this.watchInTests) return null;
+    const first = this.phaseNow(s) || {};
+    return core('jobs').runJob(first.state === 'updating' ? T('{name}: updating', { name: s.name }) : first.state === 'starting' ? T('{name}: starting', { name: s.name }) : T('{name}: installing', { name: s.name }), async (job) => {
+      if (typeof job.onCancel === 'function') job.onCancel(() => { try { this.run(s.id, 'stop').promise.catch(() => {}); } catch { /* weg */ } });
+      let lost = 0;
+      for (;;) {
+        await new Promise((res) => setTimeout(res, this.watchMs || 5000));
+        if (typeof job.checkpoint === 'function') await job.checkpoint();
+        const st = await this.dockerState(s).catch(() => null);
+        if (!st) { if ((lost += 1) > 120) return { ok: true, text: T('Docker does not answer – watching stopped.') }; continue; }
+        lost = 0;
+        if (!st.running) { this.phases.delete(s.id); this.broadcast({ type: 'games' }); return { ok: true, text: T('The container was stopped.') }; }
+        const r = await this.trackDocker(s, st, { force: true });
+        if (r.state === 'failed') throw new Error(r.error ? `${r.text} (${r.error})` : r.text);
+        if (!PH.isBusy(r)) return { ok: true, text: T('{name} is ready.', { name: s.name }) };
+        job.progress(r.pct || 0, r.text);
+      }
+    }, { key: `game-${s.id}-watch` });
+  }
+  /**
+   * Zustand für Oberfläche und Sperren: eine laufende Installations-/Update-Aufgabe (SteamCMD-Weg, nativ) oder was der
+   * Container gerade tut. null = läuft normal (oder gestoppt).
+   */
+  phaseNow(s) {
+    let list = [];
+    try { const j = core('jobs'); list = typeof j.listJobs === 'function' ? j.listJobs() : []; } catch { /* ohne Aufgaben */ }
+    const mine = list.filter((j) => j.state === 'running' && String(j.key || '').startsWith(`game-${s.id}-`));
+    const job = mine.find((j) => /-(install|auto-install|update|force-update|validate)$/.test(j.key)) || mine.find((j) => /-(start|restart)$/.test(j.key) && /SteamCMD|update|download|aktualis|herunterlad/i.test(j.text || ''));
+    if (job) return { state: /install$/.test(job.key) && !s.installed ? 'installing' : 'updating', pct: job.progress || null, text: job.text || null, since: job.startedAt, job: job.id };
+    const p = this.phases.get(s.id);
+    return s.running && p && p.result ? PH.publicPhase(p.result) : null;
   }
   async refresh(s) {
     const before = !!s.running;
@@ -512,10 +646,19 @@ class GameServers {
     const r = this.ctx.router;
     if (r && r.cfg && r.cfg.auto && typeof r.sync === 'function') r.sync().catch(() => {});
   }
-  async consoleLogAsync(s, n = 300) {
-    if (this.isSteam(s)) return this.steam.consoleLines(s, n);
-    if (this.isDocker(s)) { const r = await this.dx(['logs', '--tail', String(n), this.cname(s)], { ok: true, timeout: 20000 }); return (r.stdout + r.stderr).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').split('\n').filter(Boolean); }
-    return this.consoleLog(s, n);
+  /**
+   * Konsole: SteamCMD-Fortschritt und andere Balken als je EINE Zeile (statt hunderter „Update state …“), raw = genau die
+   * Ausgabe. Für die Zusammenfassung wird mehr gelesen, damit danach trotzdem n sinnvolle Zeilen bleiben.
+   */
+  async consoleLogAsync(s, n = 300, { raw = false } = {}) {
+    const want = Math.max(1, Math.min(5000, Number(n) || 300));
+    const read = raw ? want : Math.min(5000, want * 4);
+    let lines;
+    if (this.isSteam(s)) lines = await this.steam.consoleLines(s, read);
+    else if (this.isDocker(s)) { const r = await this.dx(['logs', '--tail', String(read), this.cname(s)], { ok: true, timeout: 20000 }); lines = `${r.stdout}${r.stderr}`.split('\n'); }
+    else lines = this.consoleLog(s, read);
+    if (raw) return lines.map((l) => String(l).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')).filter((l) => l.trim()).slice(-want);
+    return PH.condenseConsole(lines).slice(-want);
   }
   consoleLog(s, n = 300) {
     const dir = path.join(this.dir(s), 'log', 'console');
@@ -624,8 +767,9 @@ class GameServers {
   /** Ports from "details" (for forwarding). */
   async details(s) {
     if (this.isSteam(s)) return { text: '', ports: this.portsOf(s), info: {} };
+    if (PH.isBusy(this.phaseNow(s))) return { text: '', ports: this.portsOf(s), info: {}, busy: true }; // erst nach der Installation
     let r;
-    if (this.isDocker(s)) r = await this.dx(['exec', this.cname(s), `./${s.game}`, 'details'], { ok: true, timeout: 60000 });
+    if (this.isDocker(s)) r = await this.lgsmExec(s, ['details'], { timeout: 60000 });
     else { this.requireLinux(); r = await core('util').exec(this.script(s), ['details'], { cwd: this.dir(s), env: this.env(), timeout: 60000 }); }
     const { text, ports, info } = parseDetails(r.stdout + r.stderr);
     if (ports.length) { s.detail = { ports, at: Date.now() }; s.queryPort = null; this.ctx.settings.save(); }
@@ -662,7 +806,7 @@ class GameServers {
       const st = await this.dx(['inspect', '--format', '{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}', this.cname(s)], { ok: true, timeout: 20000 });
       const [run, code, oom] = st.stdout.trim().split('|');
       if (st.code !== 0) continue;
-      if (run === 'true') { this.seen.add(s.id); continue; }
+      if (run === 'true') { this.seen.add(s.id); await this.refresh(s).catch(() => {}); continue; }
       const crashed = this.seen.has(s.id) && (oom === 'true' || (Number(code) !== 0 && Number(code) !== 143));
       this.seen.delete(s.id);
       if (!crashed) { s.wantRun = false; this.ctx.settings.save(); this.broadcast({ type: 'games' }); continue; }
@@ -718,11 +862,14 @@ class GameServers {
     const answers = await Promise.all(cands.map((port) => queryInfo('127.0.0.1', port, 700).catch(() => null)));
     const k = answers.findIndex(Boolean);
     if (k >= 0) { v = { ...answers[k], queryPort: cands[k] }; if (s.queryPort !== cands[k]) { s.queryPort = cands[k]; this.ctx.settings.save(); } }
+    // Die Steam-Abfrage antwortet → das Spiel läuft, egal was die Ausgabe zuletzt sagte
+    const ph = this.phases.get(s.id);
+    if (v && ph && ph.result && ph.result.state !== 'ready') { ph.tracker.markReady('query'); ph.result = ph.tracker.result({ health: null }); this.broadcast({ type: 'games' }); }
     // Neue Spielversion (z. B. nach dem automatischen Update) – einmal melden
     if (v && v.version && s.lastVersion !== v.version) { if (s.lastVersion) this.alert('update', T('{name} now runs version {version}.', { name: s.name, version: v.version }), 'info'); s.lastVersion = v.version; this.ctx.settings.save(); }
     this.liveCache.set(s.id, { at: Date.now(), v });
     // No port details yet: read "details" once in the background (LinuxGSM knows the game's ports)
-    if (!s.detail && !this.detailBusy && s.installed && !this.isSteam(s)) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
+    if (!s.detail && !this.detailBusy && s.installed && !this.isSteam(s) && !PH.isBusy(this.phaseNow(s))) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
     return v;
   }
   address(s) { const port = this.gamePort(s); return port ? { local: `localhost:${port}`, lan: lanIps().map((ip) => `${ip}:${port}`), port } : null; }
@@ -730,11 +877,12 @@ class GameServers {
   async send(s, command) {
     const c = String(command || '').replace(/[\r\n]/g, ' ').trim().slice(0, 300);
     if (!c) throw new Error(T('The command is missing.'));
+    this.assertReady(s, 'send');
     if (this.isSteam(s)) return this.steam.send(s, c);
     const list = await this.commandsFor(s);
     if (!list.some((x) => x.cmd === 'send')) throw new Error(T('This game takes no console commands through LinuxGSM.'));
-    const r = this.isDocker(s) ? await this.dx(['exec', this.cname(s), `./${s.game}`, 'send', c], { ok: true, timeout: 30000 }) : await core('util').exec(this.script(s), ['send', c], { cwd: this.dir(s), env: this.env(), timeout: 30000 });
-    if (r.code !== 0) throw new Error(((r.stderr || r.stdout || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim().split('\n').pop()) || `Code ${r.code}`);
+    const r = this.isDocker(s) ? await this.lgsmExec(s, ['send', c], { timeout: 30000 }) : await core('util').exec(this.script(s), ['send', c], { cwd: this.dir(s), env: this.env(), timeout: 30000 });
+    if (r.code !== 0) throw new Error(PH.explainFailure(`${r.stdout || ''}\n${r.stderr || ''}`, { T }) || `Code ${r.code}`);
     return { ok: true };
   }
 
@@ -744,7 +892,7 @@ class GameServers {
     return { ...pub, password: steam ? s.password || '' : undefined, method: steam ? 'steam' : 'lgsm', dir: this.isDocker(s) ? `Docker: ${this.cname(s)} (Volume ${this.lgsmVolume(s)})` : this.dir(s), external: !!s.externalDir, script: steam ? null : s.game, commands: COMMANDS, linux: IS_LINUX, docker: this.isDocker(s),
       backups: steam ? this.steam.backups(s).length : !this.isDocker(s) && IS_LINUX ? this.backups(s).length : 0, address: this.address(s), ports: this.portsOf(s),
       links: steam ? steamLinks(s) : guideLinks(s.game, s.gameName || FAVORITES[s.game] || s.name), canSend: steam ? this.steam.canSend(s) : !!(s.cmds && s.cmds.list.some((x) => x.cmd === 'send')),
-      steam: steam ? this.steam.info(s) : null, limits: s.limits || null,
+      steam: steam ? this.steam.info(s) : null, limits: s.limits || null, phase: this.phaseNow(s),
     // „Von außen erreichbar“: geht ab Hostwerk 2.11 (Ports an Firewall/Router); router/auto für den passenden Hinweis
     outside: { supported: !!(this.ctx.security && this.ctx.security.addPortProvider), router: !!this.ctx.router, auto: !!(this.ctx.router && this.ctx.router.cfg && this.ctx.router.cfg.auto) } };
   }
@@ -930,7 +1078,7 @@ class GameServers {
   }
 
   /** Short list for Hostwerk's overview (dashboard, phone). */
-  summary() { return this.list().map((g) => ({ id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm' })); }
+  summary() { return this.list().map((g) => { const ph = this.phaseNow(g); return { id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm', phase: ph ? { state: ph.state, pct: ph.pct, text: ph.text } : null }; }); }
 
   routes(r) {
     r.get('/games', async (req, res) => {
@@ -973,13 +1121,28 @@ class GameServers {
     r.put('/games/:id', (req, res) => { const s = this.get(req.params.id); const b = req.body || {}; if (typeof b.name === 'string' && b.name.trim()) s.name = b.name.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60); for (const k of ['autostart', 'monitor', 'autoUpdate', 'public']) if (typeof b[k] === 'boolean') s[k] = b[k]; this.ctx.settings.save(); if (typeof b.public === 'boolean') this.portsChanged(); res.json(this.info(s)); });
     r.delete('/games/:id', async (req, res) => { await this.remove(req.params.id, { files: req.query.files === '1' }); res.json({ ok: true }); });
     r.get('/games/:id/commands', async (req, res) => res.json(await this.commandsFor(this.get(req.params.id), { fresh: req.query.fresh === '1' })));
-    r.get('/games/:id/console', async (req, res) => res.json({ lines: await this.consoleLogAsync(this.get(req.params.id), Number(req.query.n) || 300) }));
+    r.get('/games/:id/console', async (req, res) => { const s = this.get(req.params.id); res.json({ lines: await this.consoleLogAsync(s, Number(req.query.n) || 300, { raw: req.query.raw === '1' }), phase: this.phaseNow(s) }); });
     r.get('/games/:id/config', async (req, res) => res.json(await this.configAsync(this.get(req.params.id))));
     r.put('/games/:id/config', async (req, res) => res.json(await this.setConfigAsync(this.get(req.params.id), (req.body || {}).content || '')));
     r.get('/games/:id/details', async (req, res) => res.json(await this.details(this.get(req.params.id))));
     r.get('/games/:id/backups', (req, res) => { const s = this.get(req.params.id); res.json(this.isDocker(s) ? [] : this.backups(s)); });
-    r.post('/games/:id/:command', async (req, res) => { if (!/^(stop|kill)$/.test(req.params.command)) await this.needDocker(this.get(req.params.id)); res.json({ job: this.run(req.params.id, req.params.command, (req.body || {}).args).id }); });
+    r.post('/games/:id/:command', async (req, res) => {
+      const s = this.get(req.params.id);
+      if (!/^(stop|kill)$/.test(req.params.command)) await this.needDocker(s);
+      // Frischer Zustand vor Pflege-Befehlen: läuft im Container noch die Installation, gleich eine klare Antwort
+      if (this.isDocker(s) && !this.isSteam(s) && !PH.ALLOWED_WHILE_BUSY.test(req.params.command) && (await this.dockerAvailable())) await this.refresh(s).catch(() => {});
+      res.json({ job: this.run(req.params.id, req.params.command, (req.body || {}).args).id });
+    });
   }
+}
+
+/** Nutzer für „docker exec“: Config.User oder USER des Images – nie root (LinuxGSM verweigert root), Rückfall linuxgsm. */
+function execUserOf(cfg) {
+  const ok = (u) => !!u && /^([a-z_][a-z0-9_.-]{0,31}|\d{1,10})(:[a-z0-9_.-]{1,32})?$/i.test(u) && !/^(root|0)(:|$)/i.test(u);
+  const env = Object.fromEntries(((cfg && cfg.Env) || []).map((e) => { const i = String(e).indexOf('='); return [String(e).slice(0, i), String(e).slice(i + 1)]; }));
+  if (ok(cfg && cfg.User)) return cfg.User;
+  if (ok(env.USER)) return env.USER;
+  return 'linuxgsm';
 }
 
 /** Guides for a Steam server tool – built from the app ids only (no list of links to keep up to date). */
@@ -1021,4 +1184,4 @@ function importReason(it) {
   return T('This server tool does not run on this system.');
 }
 
-module.exports = { GameServers, publicItem, importReason, COMMANDS, FAVORITES, IS_LINUX, PICKS, pickFor, parseCommands, parseDetails, guideLinks, steamLinks, parseShellVars, setShellVars, cleanLimits, LGSM_KEYS };
+module.exports = { GameServers, execUserOf, publicItem, importReason, COMMANDS, FAVORITES, IS_LINUX, PICKS, pickFor, parseCommands, parseDetails, guideLinks, steamLinks, parseShellVars, setShellVars, cleanLimits, LGSM_KEYS };

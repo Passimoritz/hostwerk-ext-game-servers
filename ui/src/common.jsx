@@ -1,4 +1,4 @@
-import { toast } from '@hostwerk/ui';
+import { toast, Progress } from '@hostwerk/ui';
 import { SvcImage, LazyImg } from '@hostwerk/kit';
 import { apiUrl } from '@hostwerk/api';
 import { t } from '@hostwerk/i18n';
@@ -39,8 +39,38 @@ export const GameIcon = ({ s, size = 30, className = 'svc-icon' }) => <SvcImage 
 export const methodLabel = (s) => `${isSteam(s) ? 'SteamCMD' : 'LinuxGSM'}${s.docker ? ' · Docker' : ''}`;
 export const isInstalling = (jobs, id) => { const list = Object.values(jobs || {}).filter((j) => j.state === 'running'); return list.find((j) => j.key === `game-quick-${id}`) || list.find((j) => j.key === `game-create-${id}`) || null; };
 export const innerJob = (jobs, id) => Object.values(jobs || {}).find((j) => j.key === `game-create-${id}` && j.state === 'running') || null;
-export const stateOf = (s, installing) => (s.running ? 'running' : s.installed ? 'stopped' : installing ? 'starting' : 'error');
-export const stateLabel = (s, installing) => (s.installed ? undefined : installing ? t('Installing …') : t('not installed'));
+/*
+ * Was der Server gerade tut, auch wenn der Container schon „läuft“: installing / updating / starting / failed (vom Server,
+ * server/phase.js). Balken und Text kommen live aus der passenden Aufgabe (Aufgaben-Fenster), sonst aus der letzten Abfrage.
+ */
+const BUSY_JOBS = ['install', 'auto-install', 'update', 'force-update', 'validate'];
+export const isBusy = (p) => !!p && (p.state === 'installing' || p.state === 'updating' || p.state === 'starting');
+export function phaseOf(s, jobs) {
+  const list = Object.values(jobs || {}).filter((j) => j && j.state === 'running');
+  const watch = list.find((j) => j.key === `game-${s.id}-watch`);
+  if (watch && s.phase) return { ...s.phase, pct: watch.progress || s.phase.pct, text: watch.progress ? watch.text : s.phase.text };
+  const job = list.find((j) => BUSY_JOBS.some((c) => j.key === `game-${s.id}-${c}`));
+  if (job && s.installed) return { state: 'updating', pct: job.progress || null, text: job.text || null };
+  return s.phase || null;
+}
+export const PHASE_LABEL = { installing: 'Installing …', updating: 'Updating …', starting: 'Starting …', failed: 'Start failed' };
+/** Warum Pflege-Knöpfe gerade gesperrt sind (ⓘ und title) */
+export const busyReason = (p) => (!isBusy(p) ? null : p.state === 'installing' ? t('Only after the installation') : p.state === 'updating' ? t('Only after the update') : t('Only once the server runs'));
+export const stateOf = (s, installing, phase) => (isBusy(phase) ? 'starting' : phase && phase.state === 'failed' ? 'error' : s.running ? 'running' : s.installed ? 'stopped' : installing ? 'starting' : 'error');
+export const stateLabel = (s, installing, phase) => (phase && PHASE_LABEL[phase.state] ? t(PHASE_LABEL[phase.state]) : s.installed ? undefined : installing ? t('Installing …') : t('not installed'));
+/** Balken mit „Herunterladen: 5,1 GB von 6,4 GB – 20 MB/s, noch etwa 2 Min.“ (unbestimmt, solange kein Prozentwert da ist) */
+export function PhaseBar({ phase, compact = false }) {
+  if (!isBusy(phase)) return null;
+  const label = t(PHASE_LABEL[phase.state]);
+  const text = phase.text || label;
+  const pct = typeof phase.pct === 'number' && phase.pct > 0 ? Math.round(phase.pct) : null;
+  return (
+    <div className={compact ? 'gs-phase gs-phase-compact' : 'gs-phase'}>
+      <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined} aria-valuetext={text}><Progress value={pct || 0} indeterminate={!pct} /></div>
+      <div className={`${compact ? 'tiny' : 'small'} muted ellipsis`} title={text}>{text}</div>
+    </div>
+  );
+}
 export const fmtTime = (sec) => { const m = Math.floor((sec || 0) / 60); return m >= 60 ? t('{h} h {m} min', { h: Math.floor(m / 60), m: m % 60 }) : t('{m} min', { m }); };
 export const copy = (x) => navigator.clipboard.writeText(x).then(() => toast.success('Address copied'));
 export const cmdLabel = (s, cmd) => (s.commands && s.commands[cmd] ? t(s.commands[cmd]) : cmd);

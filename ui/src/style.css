@@ -106,3 +106,8 @@
 .gs-break { overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) { .game-install-anim .ring, .game-install-anim > *, .gs-card { animation: none !important; transition: none; } }
+
+/* Installation/Update im laufenden Container: Balken mit Größe, Tempo und Restzeit (Kopf, Zustand, Liste, Konsole) */
+.gs-phase { display: grid; gap: var(--sp-1); min-width: 0; }
+.gs-phase-compact { margin-top: var(--sp-2); }
+.gs-phase-card { margin-bottom: var(--sp-3); }

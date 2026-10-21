@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const cp = require('child_process');
 const G = require('./steamgames');
 const { rconExec } = require('./rcon');
+const { SteamMeter, parseSteamLine } = require('./phase');
 
 const IS_WIN = process.platform === 'win32';
 const STEAMCMD_URL = { win32: 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip', linux: 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' };
@@ -75,6 +76,7 @@ function steamResult(out) {
   if (/Success! App '\d+' (fully installed|already up to date)/i.test(text)) return { ok: true };
   if (/No subscription|Invalid Password|Login Failure|requires a license/i.test(text)) return { ok: false, login: true, msg: 'This server tool needs a Steam account that owns the game – Hostwerk only installs tools with anonymous login.' };
   if (/0x202|not enough (disk )?space/i.test(text)) return { ok: false, msg: 'Not enough free disk space for this server.' };
+  if (/Connecting anonymously to Steam Public\.\.\.\s*FAIL|Could not connect to Steam|Temporary failure in name resolution|Could not resolve host/i.test(text)) return { ok: false, msg: 'Steam or the internet cannot be reached right now – try again later.' };
   const err = text.split(/\r?\n/).reverse().find((l) => /ERROR!|Error!|FAILED/i.test(l));
   return { ok: false, msg: err ? err.trim().slice(0, 300) : 'SteamCMD ended without “Success”.' };
 }
@@ -112,6 +114,8 @@ class SteamServers {
     this.restarts = new Map(); // id → [timestamps] (monitor: at most 3 restarts in 30 min)
   }
   T(s, v) { return this.host ? this.host.t(s, v) : s; }
+  /** Fortschritt einer SteamCMD-Ausgabe in Worten (Größe, Geschwindigkeit, Restzeit) – in der Sprache der Oberfläche */
+  meter() { return new SteamMeter({ T: (s, v) => this.T(s, v), lang: this.host && typeof this.host.lang === 'function' ? this.host.lang() : 'de' }); }
   core(n) { return this.host.core(n); }
   get dataDir() { return this.gs.dataDir; }
   steamcmdExe() { return path.join(this.dataDir, 'steamcmd', IS_WIN ? 'steamcmd.exe' : 'steamcmd.sh'); }
@@ -185,6 +189,7 @@ class SteamServers {
       try { child = this.spawn(cmd, args, { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { reject(e); return; }
       let out = '';
       let idle = null;
+      const meter = this.meter(); // „Herunterladen: 5,1 GB von 6,4 GB – 20 MB/s, noch etwa 2 Min.“
       const kick = () => { clearTimeout(idle); idle = setTimeout(() => { job && job.log(this.T('No output for a long time – SteamCMD is ended.')); try { child.kill(); } catch { /* gone */ } }, idleMs); };
       kick();
       const onData = (c) => {
@@ -193,8 +198,9 @@ class SteamServers {
         out += t; if (out.length > 300000) out = out.slice(-200000);
         for (const l of t.split(/\r?\n/).map((x) => x.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()).filter(Boolean)) {
           job && job.log(l);
-          const pr = parseSteamProgress(l);
-          if (pr && job) job.progress(from + ((to - from) * pr.pct) / 100, this.T('SteamCMD: {state} {pct} %', { state: pr.state, pct: pr.pct.toFixed(1) }));
+          const pr = job ? parseSteamLine(l) : null;
+          const v = pr ? meter.feed(pr) : null;
+          if (v) job.progress(from + ((to - from) * v.pct) / 100, v.text);
         }
       };
       if (child.stdout) child.stdout.on('data', onData);
@@ -237,7 +243,8 @@ class SteamServers {
       const r = await new Promise((resolve, reject) => {
         Promise.resolve(d.sp(args, { stdio: ['ignore', 'pipe', 'pipe'] })).then((child) => {
           let buf = '';
-          const on = (ch) => { const t = String(ch); buf += t; for (const l of t.split(/\r?\n/).filter(Boolean)) { job && job.log(l); const pr = parseSteamProgress(l); if (pr && job) job.progress(10 + 0.85 * pr.pct, self.T('SteamCMD: {state} {pct} %', { state: pr.state, pct: pr.pct.toFixed(1) })); } };
+          const meter = self.meter();
+          const on = (ch) => { const t = String(ch); buf += t; for (const l of t.split(/\r?\n/).filter(Boolean)) { job && job.log(l); const pr = job ? parseSteamLine(l) : null; const v = pr ? meter.feed(pr) : null; if (v) job.progress(10 + 0.85 * v.pct, v.text); } };
           child.stdout && child.stdout.on('data', on); child.stderr && child.stderr.on('data', on);
           child.on('error', reject); child.on('close', (code) => resolve({ code, out: buf }));
         }, reject);
