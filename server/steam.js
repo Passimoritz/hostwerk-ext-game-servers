@@ -295,7 +295,7 @@ class SteamServers {
     const fd = fs.openSync(log, 'a');
     let child;
     try {
-      child = this.spawn(spec.cmd, spec.argv, { cwd: spec.cwd, env: spec.env, detached: true, windowsHide: true, windowsVerbatimArguments: spec.verbatim, stdio: ['ignore', fd, fd] });
+      child = this.spawn(spec.cmd, spec.argv, { cwd: spec.cwd, env: spec.env, detached: process.platform !== 'win32', windowsHide: true, windowsVerbatimArguments: spec.verbatim, stdio: ['ignore', fd, fd] });
     } finally { fs.closeSync(fd); }
     if (!child || !child.pid) throw new Error(this.T('The server could not be started (blocked by the system?).'));
     child.on('exit', (code, sig) => { s.lastExit = { code, sig: sig || null, at: Date.now() }; this.children.delete(s.id); this.gs.broadcast({ type: 'games' }); });

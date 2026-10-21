@@ -288,7 +288,7 @@ test('one-step setup: Docker missing → asks (code) unless installDocker; with 
   assert.ok(job.logs.some((l) => /Schritt 1 von 3/.test(l)));
 });
 
-test('steam server: start uses an argument array (no shell), detached, inside the server folder; settings are validated', async () => {
+test('steam server: start uses an argument array (no shell), detached only outside Windows, hidden window, inside the server folder; settings are validated', async () => {
   const h = fakeHost();
   const g = new GameServers(h);
   const s = g.steam.create({ appid: 896660, name: 'Club' }, { appid: 896660, win: true, linux: true });
@@ -303,7 +303,9 @@ test('steam server: start uses an argument array (no shell), detached, inside th
   assert.ok(r.ok);
   assert.strictEqual(calls[0].cmd, exe);
   assert.ok(Array.isArray(calls[0].args) && calls[0].args.includes('-port'));
-  assert.strictEqual(calls[0].opts.detached, true);
+  // Windows: not detached – a detached console app would open its own visible console window (PalServer → Shipping-Cmd)
+  assert.strictEqual(calls[0].opts.detached, process.platform !== 'win32');
+  assert.strictEqual(calls[0].opts.windowsHide, true);
   assert.ok(!calls[0].opts.shell, 'never through a shell');
   assert.strictEqual(calls[0].opts.cwd, path.dirname(exe));
   assert.strictEqual(s.pid, 999999);
