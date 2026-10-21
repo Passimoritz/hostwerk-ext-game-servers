@@ -9,7 +9,7 @@
     "de": "Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Einrichtung in einem Schritt (Docker kommt bei Bedarf mit), Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Zeitplan, Ressourcen-Grenzen, Überwachung und Portfreigabe.",
     "en": "Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. One-step setup (Docker comes along when needed), console, player list, map and version through the Steam query, updates, backups, schedule, resource limits, monitoring and port forwarding."
   },
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-game-servers",
   "license": "MIT",
@@ -30,12 +30,34 @@
       "de": "Steam-Server-Tools über SteamCMD und über 100 Spiele aus LinuxGSM.",
       "en": "Steam server tools through SteamCMD and more than 100 games from LinuxGSM."
     },
-    "icon": "gamepad"
+    "icon": "gamepad",
+    "nav": {
+      "group": "server",
+      "after": "mc"
+    }
   },
   "backend": "server/index.js",
   "ui": "ui/index.js",
   "screenshots": [
     "docs/screenshot.png",
     "docs/screenshot.de.png"
-  ]
+  ],
+  "synergies": [
+    {
+      "with": "game-network",
+      "title": {
+        "de": "Server als Verbund",
+        "en": "Servers as a network"
+      },
+      "text": {
+        "de": "Mehrere Spiele-Server gemeinsam starten, stoppen und nach Plan neu starten.",
+        "en": "Start, stop and restart several game servers together, also on a schedule."
+      }
+    }
+  ],
+  "allowExtensions": {
+    "*": [
+      "tabs"
+    ]
+  }
 }

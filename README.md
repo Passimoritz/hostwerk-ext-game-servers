@@ -21,6 +21,11 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 - Start with Hostwerk, settings editor (lgsm config) and file browser
 - Settings per server: name, ports, max players, password, start line, config files, update on start, restart after a crash, CPU/RAM limits for containers, scheduled restarts/backups (through Hostwerk’s tasks)
 - Console input for Steam servers through RCON (CS2, Garry’s Mod, TF2, Rust, ARK …)
+- **Steam Workshop** for Steam server tools: list of items (id or link), downloaded and updated with SteamCMD in one run
+- **Messages** after a crash or an update to a new game version – in Hostwerk, on the phone (push) and optionally in a Discord channel (webhook)
+- **Players for other extensions:** `GET /api/games-players` and `ctx.games.allPlayers()` (Steam query) – e.g. for a player ticker or a leaderboard
+- Error state with *Try again*, no polling while hidden, game colours readable in light and dark mode
+- Other extensions may add tabs (`allowExtensions`)
 
 ## Install
 

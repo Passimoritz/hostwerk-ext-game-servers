@@ -1,3 +1,13 @@
+## 1.5.0
+
+- Steam Workshop for Steam server tools: items by id or link, downloaded and updated with SteamCMD. / Steam-Workshop für Steam-Server-Tools: Inhalte per ID oder Link, mit SteamCMD geladen und aktualisiert.
+- Messages after a crash or an update (new game version) through Hostwerk's channels and optionally Discord. / Meldungen nach Absturz oder Update (neue Spielversion) über Hostwerks Kanäle und optional Discord.
+- Players of every running server for other extensions (`/api/games-players`, `ctx.games.allPlayers()`). / Spieler aller laufenden Server für andere Erweiterungen (`/api/games-players`, `ctx.games.allPlayers()`).
+- Missing German texts (RCON, Steam list, password rule). / Fehlende deutsche Texte (RCON, Steam-Liste, Passwortregel).
+- Game colours on the “Another game server” tile readable in light mode. / Spielfarben auf der Kachel „Weiterer Spiele-Server“ im hellen Design lesbar.
+- Interface split into modules (setup, tabs, settings, common) instead of one 877-line file. / Oberfläche in Module aufgeteilt (Einrichtung, Reiter, Einstellungen, Gemeinsames) statt einer Datei mit 877 Zeilen.
+- Error state with “Try again”; no polling while hidden; sidebar next to Minecraft (`page.nav`); other extensions may add tabs (`allowExtensions`). Release package contains everything except the repository tooling. / Fehlerzustand mit „Erneut versuchen“; keine Abfragen bei verstecktem Reiter; Seitenleiste neben Minecraft (`page.nav`); andere Erweiterungen dürfen Reiter ergänzen (`allowExtensions`). Release-Paket enthält alles außer dem Repo-Werkzeug.
+
 ## 1.4.0
 
 - Docker servers (LinuxGSM) register with Hostwerk's security updates: when Docker Hub has a newer image (Ubuntu, libraries, LinuxGSM), it is pulled, the container is made again (data stays in the volume) and a running server has to keep running – otherwise the previous image comes back. / Docker-Server (LinuxGSM) melden sich bei Hostwerks Sicherheits-Updates an: Gibt es auf Docker Hub ein neueres Image (Ubuntu, Bibliotheken, LinuxGSM), wird es geladen, der Container neu angelegt (Daten bleiben im Volume) und ein laufender Server muss weiterlaufen – sonst kommt das vorige Image zurück.

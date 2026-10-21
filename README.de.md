@@ -21,6 +21,11 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 - Mit Hostwerk starten, Einstellungs-Editor (lgsm-Konfiguration) und Dateibrowser
 - Einstellungen je Server: Name, Ports, Spielerzahl, Passwort, Startzeile, Konfigurationsdateien, Update beim Start, Neustart nach Absturz, CPU-/RAM-Grenzen für Container, geplante Neustarts/Backups (über Hostwerks Aufgaben)
 - Konsolen-Eingabe für Steam-Server über RCON (CS2, Garry’s Mod, TF2, Rust, ARK …)
+- **Steam-Workshop** für Steam-Server-Tools: Liste der Inhalte (ID oder Link), mit SteamCMD in einem Lauf geladen und aktualisiert
+- **Meldungen** nach einem Absturz oder einem Update auf eine neue Spielversion – in Hostwerk, aufs Handy (Push) und auf Wunsch in einen Discord-Kanal (Webhook)
+- **Spieler für andere Erweiterungen:** `GET /api/games-players` und `ctx.games.allPlayers()` (Steam-Abfrage) – z. B. für einen Spieler-Ticker oder eine Bestenliste
+- Fehlerzustand mit *Erneut versuchen*, keine Abfragen bei verstecktem Reiter, Spielfarben in Hell und Dunkel lesbar
+- Andere Erweiterungen dürfen Reiter ergänzen (`allowExtensions`)
 
 ## Installieren
 

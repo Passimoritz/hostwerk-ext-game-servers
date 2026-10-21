@@ -61,5 +61,7 @@
 .gs-files { height: calc(100vh - 300px); overflow: hidden; }
 .gs-spin { width: 12px; height: 12px; margin-right: var(--sp-1); }
 .gs-warn { color: var(--warn-text); }
+.gs-num { width: calc(var(--sp-8) * 5); }
+.gs-break { overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) { .game-install-anim .ring, .game-install-anim > *, .game-tile { animation: none !important; transition: none; } }
