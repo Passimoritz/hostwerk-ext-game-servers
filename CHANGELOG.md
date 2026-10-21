@@ -1,3 +1,8 @@
+## 1.6.0
+
+- Game saves in Hostwerk's backup centre (Hostwerk 2.12 or newer): every backup of every server with size and time, restore and delete right there. Restoring stops a running server, first packs the current state as its own backup (“…-before-restore”) and starts the server again afterwards. / Spielstände in Hostwerks Sicherungs-Zentrale (ab Hostwerk 2.12): jede Sicherung jedes Servers mit Größe und Zeit, Zurückspielen und Löschen direkt dort. Beim Zurückspielen wird ein laufender Server gestoppt, der aktuelle Stand vorher als eigene Sicherung gepackt („…-before-restore“) und der Server danach wieder gestartet.
+- The off-site backup takes the game saves along (tick “Data from extensions”): the save folder of every Steam server freshly packed, the newest backup of every LinuxGSM server. Docker servers keep their saves in the volume. / Die externe Sicherung nimmt die Spielstände mit (Haken „Daten aus Erweiterungen“): den Spielstand-Ordner jedes Steam-Servers frisch gepackt, die neueste Sicherung jedes LinuxGSM-Servers. Docker-Server behalten ihre Spielstände im Volume.
+
 ## 1.5.0
 
 - Steam Workshop for Steam server tools: items by id or link, downloaded and updated with SteamCMD. / Steam-Workshop für Steam-Server-Tools: Inhalte per ID oder Link, mit SteamCMD geladen und aktualisiert.

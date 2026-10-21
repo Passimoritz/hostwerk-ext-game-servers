@@ -9,7 +9,7 @@
     "de": "Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Einrichtung in einem Schritt (Docker kommt bei Bedarf mit), Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Zeitplan, Ressourcen-Grenzen, Überwachung und Portfreigabe.",
     "en": "Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. One-step setup (Docker comes along when needed), console, player list, map and version through the Steam query, updates, backups, schedule, resource limits, monitoring and port forwarding."
   },
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-game-servers",
   "license": "MIT",

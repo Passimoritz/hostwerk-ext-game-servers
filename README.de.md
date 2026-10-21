@@ -16,6 +16,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 - Konsole, Befehle senden, Spielerliste, Karte und Version per Steam-Abfrage (A2S)
 - Alle LinuxGSM-Befehle – auch die spielspezifischen, die das Skript anbietet (z. B. wipe bei Rust)
 - Updates (automatisch, wenn niemand spielt), Backups, Überwachen mit Neustart nach Absturz
+- Spielstände in Hostwerks Sicherungs-Zentrale (dort zurückspielen und löschen, der aktuelle Stand wird vorher gesichert) und in der externen Sicherung („Daten aus Erweiterungen“) – ab Hostwerk 2.12
 - Sicherheits-Updates für das Docker-Image der LinuxGSM-Server über Hostwerks Sicherheits-Updates – mit Probe und dem vorigen Image als Rückweg (ab Hostwerk 2.11)
 - Ports und Adressen, Freigabe über die Erweiterung „Router & Portfreigaben“
 - Mit Hostwerk starten, Einstellungs-Editor (lgsm-Konfiguration) und Dateibrowser

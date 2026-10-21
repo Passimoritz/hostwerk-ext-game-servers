@@ -540,6 +540,14 @@
   "in the Docker volume": "im Docker-Volume",
   "failed": "fehlgeschlagen",
   "downloaded": "heruntergeladen",
+  "{name}: restore backup": "{name}: Sicherung zurückspielen",
+  "Stopping the server …": "Server wird gestoppt …",
+  "Backing up the current state first …": "Aktuellen Stand vorher sichern …",
+  "Restoring {file} …": "{file} wird zurückgespielt …",
+  "Restored.": "Zurückgespielt.",
+  "Starting the server again …": "Server wird wieder gestartet …",
+  "{name}: runs in Docker – its saves stay in the volume.": "{name}: läuft in Docker – die Spielstände bleiben im Volume.",
+  "{name}: no save folder chosen (Settings → Backups).": "{name}: kein Spielstand-Ordner gewählt (Einstellungen → Sicherungen).",
   "$patterns": [
     [
       "Invalid port “{}” – write e.g. 2456/udp.",

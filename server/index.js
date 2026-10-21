@@ -5,6 +5,7 @@
  */
 const { GameServers } = require('./gameservers');
 const { imageSource } = require('./imageupdates');
+const { backupSource, registerBackups } = require('./backupsource');
 
 exports.activate = (host) => {
   const games = host.provide('games', new GameServers(host));
@@ -17,7 +18,10 @@ exports.activate = (host) => {
   // Security updates for the LinuxGSM image of Docker servers (Hostwerk 2.11+: patchUpdates.register) – with trial and fallback
   const pu = host.ctx.patchUpdates;
   const offUpdates = pu && typeof pu.register === 'function' ? pu.register('game-servers', imageSource(games, host)) : null;
-  host.on('shutdown', () => { if (offUpdates) offUpdates(); if (host.ctx.security && host.ctx.security.removePortProvider) host.ctx.security.removePortProvider('game-servers'); return games.stop(); });
+  // Spielstände in der Sicherungs-Zentrale und in der externen Sicherung (Hostwerk 2.12+, SDK 2.10) – vorher ohne
+  const { runJob } = host.core('jobs');
+  const offBackups = registerBackups(host, backupSource(games, { t: (s, v) => host.t(s, v), runJob, zipDir: (src, dest) => host.core('util').zipDir(src, dest) }));
+  host.on('shutdown', () => { if (offBackups) offBackups(); if (offUpdates) offUpdates(); if (host.ctx.security && host.ctx.security.removePortProvider) host.ctx.security.removePortProvider('game-servers'); return games.stop(); });
 };
 
 exports.deactivate = () => {};
