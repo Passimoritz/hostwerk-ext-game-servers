@@ -31,6 +31,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool ü
 - **Steam-Workshop** für Steam-Server-Tools: Liste der Inhalte (ID oder Link), mit SteamCMD in einem Lauf geladen und aktualisiert
 - **Meldungen** nach einem Absturz oder einem Update auf eine neue Spielversion – in Hostwerk, aufs Handy (Push) und auf Wunsch in einen Discord-Kanal (Webhook)
 - **Spieler für andere Erweiterungen:** `GET /api/games-players` und `ctx.games.allPlayers()` (Steam-Abfrage) – z. B. für einen Spieler-Ticker oder eine Bestenliste
+- **Versionen für andere Erweiterungen:** `ctx.games.summary()` nennt den installierten Stand (Steam-Build-ID aus dem App-Manifest von SteamCMD, wo Steam sie kennt) und das Docker-Image mit Tag – z. B. für die Schwachstellen-Wache; nur lesen
 - Fehlerzustand mit *Erneut versuchen*, keine Abfragen bei verstecktem Reiter, Spielfarben in Hell und Dunkel lesbar
 - Andere Erweiterungen dürfen Reiter ergänzen (`allowExtensions`)
 

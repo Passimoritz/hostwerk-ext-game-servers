@@ -274,3 +274,32 @@ test('the task window: while busy a watching task shows the bar; it ends when th
   assert.match(res.text, /ist bereit/);
   assert.ok(progress.some(([p, t]) => p > 70 && /^Herunterladen/.test(t)));
 });
+
+test('summary (1.10): Steam build id from the appmanifest as version, Docker image with tag, no version in Docker', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const h = fakeHost('en');
+  const g = new GameServers(h);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-ver-'));
+  const lgsmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-ver-l-'));
+  fs.mkdirSync(path.join(dir, 'steamapps'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'steamapps', 'appmanifest_896660.acf'), '"AppState"\n{\n\t"appid"\t\t"896660"\n\t"buildid"\t\t"16450218"\n}\n');
+  fs.mkdirSync(path.join(lgsmDir, 'serverfiles', 'steamapps'), { recursive: true });
+  fs.writeFileSync(path.join(lgsmDir, 'serverfiles', 'steamapps', 'appmanifest_258550.acf'), '"AppState"\n{\n\t"buildid"\t\t"777"\n}\n');
+  h.S.games = { servers: [
+    { id: 'val', name: 'Valheim', kind: 'steam', appid: 896660, mode: 'native', externalDir: dir, installed: true },
+    { id: 'rust', name: 'Rust', game: 'rustserver', mode: 'native', externalDir: lgsmDir, installed: true },
+    { id: 'vh', name: 'Valheim (Docker)', game: 'vhserver', mode: 'docker', installed: true },
+    { id: 'st', name: 'Steam in Docker', kind: 'steam', appid: 1, mode: 'docker', installed: true },
+  ] };
+  const s = Object.fromEntries(g.summary().map((x) => [x.id, x]));
+  assert.deepStrictEqual([s.val.version, s.val.versionKind, s.val.image], ['16450218', 'steam-build', null]);
+  assert.strictEqual(s.rust.version, '777');
+  assert.deepStrictEqual([s.vh.version, s.vh.image], [null, 'gameservermanagers/gameserver:vh']);
+  assert.strictEqual(s.st.image, 'cm2network/steamcmd:root');
+  // unchanged file → from the cache; changed build id → new value
+  fs.writeFileSync(path.join(dir, 'steamapps', 'appmanifest_896660.acf'), '"AppState"\n{\n\t"buildid"\t\t"16450300"\n}\n');
+  const t = new Date(Date.now() + 5000); fs.utimesSync(path.join(dir, 'steamapps', 'appmanifest_896660.acf'), t, t);
+  assert.strictEqual(g.summary().find((x) => x.id === 'val').version, '16450300');
+  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(lgsmDir, { recursive: true, force: true });
+});

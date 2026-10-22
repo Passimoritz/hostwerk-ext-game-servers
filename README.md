@@ -31,6 +31,7 @@ Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool thr
 - **Steam Workshop** for Steam server tools: list of items (id or link), downloaded and updated with SteamCMD in one run
 - **Messages** after a crash or an update to a new game version – in Hostwerk, on the phone (push) and optionally in a Discord channel (webhook)
 - **Players for other extensions:** `GET /api/games-players` and `ctx.games.allPlayers()` (Steam query) – e.g. for a player ticker or a leaderboard
+- **Versions for other extensions:** `ctx.games.summary()` names the installed build (Steam build id from SteamCMD's app manifest, where Steam knows it) and the Docker image with tag – e.g. for the vulnerability watch; read only
 - Error state with *Try again*, no polling while hidden, game colours readable in light and dark mode
 - Other extensions may add tabs (`allowExtensions`)
 

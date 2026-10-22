@@ -120,7 +120,7 @@ class GameServers {
     this.steam = new SteamServers(this, host);
     this.apps = new SteamAppList({ dataDir: this.dataDir });
     // Game pictures: found once per game, kept in Hostwerk's image cache (works offline afterwards)
-    this.art = new GameArt({ dataDir: this.dataDir, imageCache: this.ctx.imageCache, offline: () => { try { return core('download').isOffline() === true; } catch { return false; } } });
+    this.art = new GameArt({ dataDir: this.dataDir, imageCache: this.ctx.imageCache, offline: () => { try { return H && H.net && typeof H.net.offline === 'function' ? H.net.offline() === true : core('download').isOffline() === true; } catch { return false; } } });
     this.lastScan = new Map(); // last import search: key → found server (with the details that stay on the server)
     this.seen = new Set();
     this.phases = new Map(); // id → { startedAt, tracker, result } – was ein laufender LinuxGSM-Container gerade tut (phase.js)
@@ -1077,8 +1077,43 @@ class GameServers {
     }, { key: 'game-create-' + s.id });
   }
 
-  /** Short list for Hostwerk's overview (dashboard, phone). */
-  summary() { return this.list().map((g) => { const ph = this.phaseNow(g); return { id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm', phase: ph ? { state: ph.state, pct: ph.pct, text: ph.text } : null }; }); }
+  /**
+   * Installed game version as far as Steam tells it: the build id from SteamCMD's appmanifest_<appid>.acf in the server
+   * folder (SteamCMD servers: <folder>/steamapps, LinuxGSM: <folder>/serverfiles/steamapps). Servers in Docker keep their
+   * files in a volume – no version there (null, honestly). Read only; cached per file until it changes.
+   * → { version, versionKind: 'steam-build' } or { version: null, versionKind: null }
+   */
+  versionOf(g) {
+    const none = { version: null, versionKind: null };
+    if (!g || (g.mode === 'docker' && !g.externalDir)) return none;
+    let dir; try { dir = this.dir(g); } catch { return none; }
+    const sa = [path.join(dir, 'steamapps'), path.join(dir, 'serverfiles', 'steamapps')];
+    this.verCache = this.verCache || new Map();
+    for (const d of sa) {
+      let files = []; try { files = fs.readdirSync(d).filter((f) => /^appmanifest_\d+\.acf$/.test(f)); } catch { continue; }
+      if (g.appid) files.sort((a, b) => (a === `appmanifest_${g.appid}.acf` ? -1 : b === `appmanifest_${g.appid}.acf` ? 1 : 0));
+      for (const f of files) {
+        const file = path.join(d, f);
+        let mtime = 0; try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
+        const hit = this.verCache.get(file);
+        if (hit && hit.mtime === mtime) return hit.v;
+        let st = {}; try { st = IM.parseVdf(fs.readFileSync(file, 'utf8').slice(0, 64 * 1024)).appstate || {}; } catch { /* unreadable */ }
+        const v = /^\d+$/.test(String(st.buildid || '')) ? { version: String(st.buildid), versionKind: 'steam-build' } : none;
+        this.verCache.set(file, { mtime, v });
+        return v;
+      }
+    }
+    return none;
+  }
+  /** Docker image (with tag) of a server in Docker – LinuxGSM image per game or the SteamCMD image; null outside Docker. */
+  imageOf(g) {
+    if (!g || g.mode !== 'docker') return null;
+    if (g.kind === 'steam') return require('./steam').DOCKER_IMAGE;
+    return g.game ? `gameservermanagers/gameserver:${String(g.game).replace(/server$/, '')}` : null;
+  }
+
+  /** Short list for Hostwerk's overview (dashboard, phone) – since 1.10 with version (Steam build id) and Docker image. */
+  summary() { return this.list().map((g) => { const ph = this.phaseNow(g); return { id: g.id, name: g.name, game: g.gameName || g.game, running: !!g.running, docker: g.mode === 'docker', method: g.kind === 'steam' ? 'steam' : 'lgsm', phase: ph ? { state: ph.state, pct: ph.pct, text: ph.text } : null, ...this.versionOf(g), image: this.imageOf(g) }; }); }
 
   routes(r) {
     r.get('/games', async (req, res) => {
