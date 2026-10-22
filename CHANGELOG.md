@@ -1,3 +1,8 @@
+## 1.10.1
+
+- German texts use Hostwerk’s words: “Sicherung” instead of “Backup” (also “Jetzt sichern”). / Deutsche Texte mit Hostwerks Wörtern: „Sicherung“ statt „Backup“ (auch „Jetzt sichern“).
+- Empty schedule and item lists use Hostwerk’s empty tile; the install spinner is Hostwerk’s small spinner instead of an own one. / Leere Zeitpläne und Gegenstandslisten zeigen Hostwerks Leer-Kachel; der Installations-Kreisel ist Hostwerks kleiner Kreisel statt eines eigenen.
+
 ## 1.10.0
 
 - Versions for other extensions: `ctx.games.summary()` now names the installed build of each server (Steam build id from SteamCMD's appmanifest in the server folder – SteamCMD and LinuxGSM servers) and the Docker image with tag of servers in Docker; servers in Docker keep their files in a volume, so their build stays unknown. Read only, cached until the manifest changes. / Versionen für andere Erweiterungen: `ctx.games.summary()` nennt jetzt den installierten Stand jedes Servers (Steam-Build-ID aus dem App-Manifest von SteamCMD im Server-Ordner – SteamCMD- und LinuxGSM-Server) und das Docker-Image mit Tag von Servern in Docker; Server in Docker haben ihre Dateien in einem Volume, ihr Stand bleibt deshalb unbekannt. Nur lesen, zwischengespeichert, bis sich das Manifest ändert.

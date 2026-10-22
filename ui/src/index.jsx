@@ -138,7 +138,7 @@ function GameCard({ s, installing, phase, reload }) {
       {s.installed && busy && <PhaseBar phase={phase} compact />}
       <div className="svc-actions" onClick={(e) => e.stopPropagation()}>
         {s.installed ? <ServiceButtons base={`/games/${s.id}`} state={s.running ? 'running' : 'stopped'} size="sm" restart={!busy} onError={(e) => toast.error(e.message)} />
-          : installing ? <span className="small muted"><span className="spinner gs-spin" />{installing.text || t('installing …')}</span>
+          : installing ? <span className="small muted"><span className="spinner sm gs-spin" />{installing.text || t('installing …')}</span>
           : <Btn className="sm primary" icon={Download} onClick={() => post(`/games/${s.id}/auto-install`).then(reload).catch((er) => toast.error(er.message))}>Continue installation</Btn>}
       </div>
     </div>

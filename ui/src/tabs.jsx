@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Gamepad2, Download, ShieldCheck, Archive, Plus, Trash2, TerminalSquare, Info, RefreshCw, ExternalLink, Wrench, Users, Network, BookOpen, Copy, Map as MapIcon, Tag, Send, Lock, CalendarClock, Check, RotateCcw, KeyRound, Boxes, Save, FolderOpen, FileText } from 'lucide-react';
 import { get, post, del, useApi, waitJob, fmtBytes, fmtDate, openExternal, useRefresh, put } from '@hostwerk/api';
-import { Btn, Field, Empty, Loading, StatusPill, toast, confirmDialog, InfoTip } from '@hostwerk/ui';
+import { Btn, Field, Empty, Loading, StatusPill, toast, confirmDialog, InfoTip, TileEmpty } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
 import { BASE, cmdLabel, copy, fmtTime, isSteam, isBusy, busyReason, PhaseBar, stateOf, stateLabel } from './common';
 
@@ -229,7 +229,7 @@ export function ScheduleTab({ s }) {
     <div className="grid split-side">
       <div className="card">
         <div className="card-head"><CalendarClock size={16} /><h3>Planned for this server</h3><div className="right"><a className="btn xs ghost" href="#/aufgaben">{t('All tasks')}</a></div></div>
-        {!tasks.data ? <Loading /> : mine.length === 0 ? <div className="card-body small muted">{t('Nothing planned yet – e.g. a restart every night keeps long-running servers fresh.')}</div> : mine.map((x) => (
+        {!tasks.data ? <Loading /> : mine.length === 0 ? <TileEmpty text={t('Nothing planned yet – e.g. a restart every night keeps long-running servers fresh.')} /> : mine.map((x) => (
           <div key={x.id} className="list-item">
             <CalendarClock size={15} className="muted" />
             <div className="grow small"><b>{label(x.action.command)}</b><div className="tiny muted">{x.schedule && x.schedule.mode === 'daily' ? t('daily at {time}', { time: x.schedule.time }) : x.actionLabel}{x.nextRun ? ` · ${t('next: {when}', { when: fmtDate(x.nextRun) })}` : ''}{x.lastStatus ? ` · ${t('last: {s}', { s: x.lastStatus })}` : ''}</div></div>
@@ -311,7 +311,7 @@ export function WorkshopTab({ s }) {
       <div className="card">
         <div className="card-head"><FolderOpen size={16} /><h3>Downloaded</h3>{d.updatedAt && <span className="tiny muted">{t('last update {when}', { when: new Date(d.updatedAt).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' }) })}</span>}</div>
         {d.dir && <div className="card-body small"><span className="muted">{t('Folder:')}</span> <code className="gs-break">{d.dir}</code></div>}
-        {!d.items.length ? <div className="card-body small muted">No items yet.</div> : d.items.map((x) => {
+        {!d.items.length ? <TileEmpty text="No items yet." /> : d.items.map((x) => {
           const failed = (d.failed || []).find((y) => y.id === x.id);
           return (
             <div key={x.id} className="list-item">

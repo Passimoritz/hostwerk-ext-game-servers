@@ -100,7 +100,7 @@
 .gs-start { align-items: start; }
 .gs-wide { max-width: none; }
 .gs-files { height: calc(100vh - 300px); overflow: hidden; }
-.gs-spin { width: 12px; height: 12px; margin-right: var(--sp-1); }
+.gs-spin { margin-right: var(--sp-1); }
 .gs-warn { color: var(--warn-text); }
 .gs-num { width: calc(var(--sp-8) * 5); }
 .gs-break { overflow-wrap: anywhere; }
