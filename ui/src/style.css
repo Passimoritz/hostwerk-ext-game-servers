@@ -22,7 +22,13 @@
 .gs-filter.on { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
 .gs-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gs-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--sp-3); }
-.gs-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+/* Rand, Fläche und Rundung kommen von Hostwerks .card – hier nur Aufbau und Hover */
+.gs-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.gs-cards-compact { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-2); }
+.gs-card-row { flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2); }
+.gs-card-row .gs-card-body { padding: 0; gap: 2px; }
+.gs-card-row .gs-card-name { font-size: var(--fs-sm); -webkit-line-clamp: 1; }
+.gs-card-row .gs-card-meta { min-height: 0; }
 .gs-card:hover, .gs-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
 .gs-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gs-card-off { cursor: not-allowed; opacity: .55; }

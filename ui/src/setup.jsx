@@ -55,15 +55,17 @@ export function QuickStart({ onMore, onDone }) {
   };
   return (
     <div className="card">
-      <div className="card-head"><Rocket size={16} /><h3>Set up your first game server</h3><span className="small muted">{t('One click – Hostwerk does the rest')}</span></div>
+      <div className="card-head"><Rocket size={16} /><h3>Set up your first game server</h3><span className="small muted grow">{t('One click – Hostwerk does the rest')}</span>
+        {!sel && <div className="right"><Btn className="ghost sm" icon={Search} onClick={onMore}>All games …</Btn></div>}
+      </div>
       <div className="card-body stack">
         {!sel ? (
           <>
             <div className="label">1. Pick a game</div>
-            <div className="gs-cards">
-              {env.picks.map((p) => <PickCard key={p.key} pick={{ ...p, game: p.method === 'steam' ? p.gameAppId : p.game, appid: p.appid }} onPick={() => { setSel(p); setName(''); }} badge={p.needsDocker ? 'Docker' : null} />)}
+            {/* Kompaktes Raster: kleines Bild + Name je Spiel, so passen 4–6 Spiele in eine Reihe */}
+            <div className="gs-cards gs-cards-compact">
+              {env.picks.map((p) => <PickCard key={p.key} compact pick={{ ...p, game: p.method === 'steam' ? p.gameAppId : p.game, appid: p.appid }} onPick={() => { setSel(p); setName(''); }} badge={p.needsDocker ? 'Docker' : null} />)}
             </div>
-            <div className="row-tight"><Btn className="ghost" icon={Search} onClick={onMore}>All games …</Btn></div>
           </>
         ) : (
           <>
@@ -94,13 +96,16 @@ export const gameName = (n) => String(n || '').replace(/\s*\((dedicated server|s
 const steamPick = (a) => ({ method: 'steam', key: `steam-${a.appid}`, appid: a.appid, game: a.game, name: gameName(a.name), tool: a.name, profile: a.profile, popular: a.popular, ram: a.ram, plan: a.plan, off: a.plan && a.plan.reason ? a.plan.reason : null, needsDocker: !!(a.plan && a.plan.needsDocker) });
 const lgsmPick = (g, linux) => ({ method: 'lgsm', key: g.game, game: g.game, short: g.short, name: t(g.hint || g.name), tool: g.name, os: g.os, popular: g.popular !== null && g.popular !== undefined, ram: g.ram, needsDocker: !linux });
 
-/** One game as a card: picture, name, at most one badge, the id quietly at the bottom. */
-export function PickCard({ pick, onPick, badge = null, warn = null }) {
+/**
+ * One game as a card (Hostwerk's own .card): picture, name, at most one badge, the id quietly at the bottom.
+ * compact = small square picture next to the name (quick start), so more games fit in one row.
+ */
+export function PickCard({ pick, onPick, badge = null, warn = null, compact = false }) {
   const off = !!pick.off;
   const why = pick.off === 'login' ? t('Needs a Steam account that owns the game') : off ? t('Not available on this system') : null;
   return (
-    <button type="button" className={`gs-card${off ? ' gs-card-off' : ''}`} onClick={onPick} disabled={off} title={why || pick.tool || pick.name} aria-label={why ? `${pick.name} – ${why}` : pick.name}>
-      <GameArt appid={pick.method === 'steam' ? pick.appid : null} game={pick.method === 'steam' ? pick.game : null} short={pick.short} name={pick.name} shape="wide" />
+    <button type="button" className={`card gs-card${compact ? ' gs-card-row' : ''}${off ? ' gs-card-off' : ''}`} onClick={onPick} disabled={off} title={why || pick.tool || pick.name} aria-label={why ? `${pick.name} – ${why}` : pick.name}>
+      <GameArt appid={pick.method === 'steam' ? pick.appid : null} game={pick.method === 'steam' ? pick.game : null} short={pick.short} name={pick.name} shape={compact ? 'square' : 'wide'} />
       <span className="gs-card-body">
         <span className="gs-card-name">{pick.name}</span>
         <span className="gs-card-meta">
