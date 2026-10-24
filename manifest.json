@@ -42,6 +42,7 @@
     "docs/screenshot.png",
     "docs/screenshot.de.png"
   ],
+  "videos": "videos/index.json",
   "synergies": [
     {
       "with": "game-network",

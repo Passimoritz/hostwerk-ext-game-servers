@@ -1,0 +1,32 @@
+[
+  {
+    "id": "spiele",
+    "lang": "de",
+    "title": "Spiele-Server – der Rundgang",
+    "seconds": 61
+  },
+  {
+    "id": "spiele-stimme",
+    "lang": "de",
+    "title": "Spiele-Server – der Rundgang",
+    "seconds": 61,
+    "voice": true,
+    "of": "spiele",
+    "section": "stimme"
+  },
+  {
+    "id": "spiele-en",
+    "lang": "en",
+    "title": "Game servers – the full tour",
+    "seconds": 62
+  },
+  {
+    "id": "spiele-stimme-en",
+    "lang": "en",
+    "title": "Game servers – the full tour",
+    "seconds": 62,
+    "voice": true,
+    "of": "spiele-en",
+    "section": "stimme"
+  }
+]
