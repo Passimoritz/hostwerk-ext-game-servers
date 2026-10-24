@@ -1,3 +1,7 @@
+## 1.10.3
+
+- New animated icon and banner in the common Hostwerk style (isometric block). / Neues animiertes Symbol und Banner im gemeinsamen Hostwerk-Stil (isometrischer Block).
+
 ## 1.10.2
 
 - Quick start without a server: the games as a compact grid (small picture + name, 4–6 per row) and “All games …” in the card head; game cards use Hostwerk’s own card style instead of an own frame / Schnellstart ohne Server: die Spiele als kompaktes Raster (kleines Bild + Name, 4–6 je Reihe) und „Alle Spiele …“ im Kartenkopf; Spielkarten nutzen Hostwerks eigene Karte statt eines eigenen Rahmens
