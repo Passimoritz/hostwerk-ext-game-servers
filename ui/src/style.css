@@ -117,3 +117,33 @@
 .gs-phase { display: grid; gap: var(--sp-1); min-width: 0; }
 .gs-phase-compact { margin-top: var(--sp-2); }
 .gs-phase-card { margin-bottom: var(--sp-3); }
+
+/* ---------- 2.0: Teil „Verbund“ (bis 1.3 Erweiterung „Spiele-Server-Verbund“) ---------- */
+/* Game server network – only what Hostwerk's kit lacks, all from the design scale */
+.gn-pick { display: flex; flex-direction: column; gap: var(--sp-1); max-height: calc(var(--sp-8) * 10); overflow: auto; }
+.gn-pick-item { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-lg); cursor: pointer; min-width: 0; }
+.gn-pick-item.gn-picked { border-color: var(--accent); background: var(--accent-soft); }
+.gn-pick-item:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gn-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); counter-reset: gn; }
+.gn-members li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); min-width: 0; }
+.gn-members li::before { counter-increment: gn; content: counter(gn); font-size: var(--fs-2xs); color: var(--muted); min-width: var(--sp-4); text-align: right; font-variant-numeric: tabular-nums; }
+.gn-dot { width: var(--sp-2); height: var(--sp-2); border-radius: 50%; background: var(--line-2); flex: none; }
+.gn-members li.gn-on .gn-dot { background: var(--ok); }
+.gn-members a { color: inherit; text-decoration: none; }
+.gn-members a:hover, .gn-members a:focus-visible { text-decoration: underline; }
+.gn-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.gn-gap { gap: var(--sp-2); }
+.gn-wrap { flex-wrap: wrap; }
+.gn-time { width: auto; }
+.gn-skel { height: calc(var(--sp-8) * 2); }
+.gn-tile { color: inherit; text-decoration: none; gap: var(--sp-1); }
+.gn-big { font-size: var(--fs-2xl); }
+.gn-pickbar { margin-bottom: var(--sp-3); overflow-x: auto; }
+.gn-tab { margin-top: var(--sp-4); }
+.gn-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); counter-reset: gno; }
+.gn-order li { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-6); }
+.gn-order li::before { counter-increment: gno; content: counter(gno); font-size: var(--fs-2xs); color: var(--muted); min-width: var(--sp-4); text-align: right; }
+.gn-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
+.gn-ok-line { color: var(--ok-text, var(--text)); }
+.gn-err-line { color: var(--err-text, var(--err)); }
+.gn-table { width: 100%; }

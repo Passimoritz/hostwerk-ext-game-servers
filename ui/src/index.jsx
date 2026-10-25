@@ -11,6 +11,7 @@ import { BackupsTab, CommandsTab, ConsoleTab, GuidesCard, GuidesTab, NetworkTab,
 import { LgsmConfig, SettingsTab, SteamConfig } from './settings';
 import { AddonTabs } from './addons';
 import { ImportTab } from './importer';
+import { NetworkPage, PlayersTile, MemberCard } from './network';
 import './style.css';
 
 /*
@@ -206,6 +207,12 @@ export function GamesPage({ path = [], ext }) {
 
 export default {
   pages: { main: GamesPage },
+  // 2.0: Teil „Verbund“ (bis 1.3 eigene Erweiterung „Spiele-Server-Verbund“) – Reiter, Kachel und Karte bei Minecraft
+  slots: {
+    'games.tabs': [{ id: 'network', title: 'Network', icon: Network, Component: NetworkPage, order: 40 }],
+    'dashboard.tiles': [{ id: 'players', title: 'Network players', icon: Users, size: 'third', Component: PlayersTile }],
+    'mc.connect': [{ id: 'network', title: 'Network', Component: MemberCard, order: 70 }],
+  },
   // Seitenleiste: Punkt je Server (läuft/gestoppt), leere Liste = „noch keiner eingerichtet“ (Hostwerk zeigt dann einen gestrichelten Kreis)
   nav: {
     tip: (o) => {

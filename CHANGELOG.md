@@ -1,3 +1,9 @@
+# Changelog
+
+## 2.0.0
+
+- The former extension "Game server network" lives here now (SDK 3.8 `replaces`): the tab "Network" on the game servers page, the tile "Network players" and the card at Minecraft servers stay; same data (settings.gameNetwork) and the same router forwardings. Hostwerk installs this version for everyone who had the network extension and removes it. / Die frühere Erweiterung „Spiele-Server-Verbund“ steckt jetzt hier (SDK 3.8 `replaces`): der Reiter „Verbund“ auf der Seite der Spiele-Server, die Kachel „Spieler im Verbund“ und die Karte bei Minecraft-Servern bleiben; gleiche Daten (settings.gameNetwork) und dieselben Router-Freigaben. Hostwerk installiert diese Fassung für alle mit dem Verbund und entfernt ihn.
+
 ## 1.10.3
 
 - New animated icon and banner in the common Hostwerk style (isometric block). / Neues animiertes Symbol und Banner im gemeinsamen Hostwerk-Stil (isometrischer Block).

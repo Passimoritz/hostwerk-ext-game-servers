@@ -32,6 +32,8 @@ exports.activate = (host) => {
   const { runJob } = host.core('jobs');
   const offBackups = registerBackups(host, backupSource(games, { t: (s, v) => host.t(s, v), runJob, zipDir: (src, dest) => host.core('util').zipDir(src, dest) }));
   host.on('shutdown', () => { if (offBackups) offBackups(); if (offUpdates) offUpdates(); if (host.ctx.security && host.ctx.security.removePortProvider) host.ctx.security.removePortProvider('game-servers'); return games.stop(); });
+  // 2.0: Teil „Verbund“ (bis 1.3 eigene Erweiterung „Spiele-Server-Verbund“) – Daten settings.gameNetwork, Dienst gameNetwork
+  require('./network-ext').activate(host);
 };
 
 exports.deactivate = () => {};

@@ -6,10 +6,10 @@
     "en": "Game servers"
   },
   "description": {
-    "de": "Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Einrichtung in einem Schritt (Docker kommt bei Bedarf mit), vorhandene Server übernehmen (Steam, SteamCMD, LinuxGSM, Docker), Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Zeitplan, Ressourcen-Grenzen, Überwachung und Portfreigabe.",
-    "en": "Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. One-step setup (Docker comes along when needed), taking over existing servers (Steam, SteamCMD, LinuxGSM, Docker), console, player list, map and version through the Steam query, updates, backups, schedule, resource limits, monitoring and port forwarding."
+    "de": "Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Einrichtung in einem Schritt (Docker kommt bei Bedarf mit), vorhandene Server übernehmen (Steam, SteamCMD, LinuxGSM, Docker), Konsole, Spielerliste, Karte und Version per Steam-Abfrage, Updates, Backups, Zeitplan, Ressourcen-Grenzen, Überwachung und Portfreigabe. Dazu der Verbund: Spiele-Server, die zusammengehören, gemeinsam starten (mit Bereitschaftsprüfung), gemeinsamer Zeitplan, gleiches Passwort und gleiche Spielerplätze, Ports und Router-Freigaben auf einen Blick.",
+    "en": "Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. One-step setup (Docker comes along when needed), taking over existing servers (Steam, SteamCMD, LinuxGSM, Docker), console, player list, map and version through the Steam query, updates, backups, schedule, resource limits, monitoring and port forwarding. Plus networks: game servers that belong together start together (with a readiness check), share a schedule, a password and player slots, with ports and router forwarding at a glance."
   },
-  "version": "1.10.3",
+  "version": "2.0.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-game-servers",
   "license": "MIT",
@@ -18,6 +18,10 @@
   "color": "#ea580c",
   "category": "games",
   "hostwerk": ">=2.11.0",
+  "sdkVersion": "3.8",
+  "replaces": [
+    "game-network"
+  ],
   "permissions": [
     "native"
   ],
@@ -48,14 +52,21 @@
   "videos": "videos/index.json",
   "synergies": [
     {
-      "with": "game-network",
+      "with": "mc-network",
       "title": {
-        "de": "Server als Verbund",
-        "en": "Servers as a network"
+        "de": "Minecraft-Netzwerke mit Proxy, Bedrock und Versionen",
+        "en": "Minecraft networks with proxy, Bedrock and versions"
       },
       "text": {
-        "de": "Mehrere Spiele-Server gemeinsam starten, stoppen und nach Plan neu starten.",
-        "en": "Start, stop and restart several game servers together, also on a schedule."
+        "de": "Proxy-Netzwerke richtet „Minecraft-Servernetzwerk“ ein – hier startest du sie zusammen mit anderen Spiele-Servern.",
+        "en": "Proxy networks are set up in “Minecraft server network” – here you start them together with other game servers."
+      }
+    },
+    {
+      "with": "router",
+      "title": {
+        "de": "Alle Ports des Verbunds mit einem Klick im Router freigeben",
+        "en": "Forward every port of the network in the router with one click"
       }
     }
   ],
@@ -71,5 +82,8 @@
   },
   "liveEvents": [
     "games"
+  ],
+  "provides": [
+    "gameNetwork"
   ]
 }

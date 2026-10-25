@@ -2,6 +2,8 @@
 
 # Game servers
 
+> **Since 2.0 with networks:** this also contains the former “Game server network” – as the tab “Network” on the game servers page: servers that belong together start in order, share a schedule and a password, with ports and router forwarding at a glance. Anyone who had it gets this version automatically; the networks stay.
+
 Valheim, Palworld, Satisfactory, Rust, ARK and every other Steam server tool through SteamCMD – plus more than 100 games through LinuxGSM. Natively where possible, in Docker containers where not.
 
 [Deutsch](README.de.md) · An official [Hostwerk](https://github.com/Passimoritz/hostwerk-public) extension (native extension, Hostwerk 2.11 or newer)

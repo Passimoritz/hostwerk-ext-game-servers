@@ -2,6 +2,8 @@
 
 # Spiele-Server
 
+> **Seit 2.0 mit Verbund:** Hier steckt auch der frühere „Spiele-Server-Verbund“ – als Reiter „Verbund“ auf der Seite der Spiele-Server: Server, die zusammengehören, der Reihe nach starten, gemeinsamer Zeitplan, gleiches Passwort, Ports und Router-Freigaben auf einen Blick. Wer den Verbund hatte, bekommt diese Fassung automatisch; die Verbünde bleiben.
+
 Valheim, Palworld, Satisfactory, Rust, ARK und jedes andere Steam-Server-Tool über SteamCMD – dazu über 100 Spiele über LinuxGSM. Direkt auf dem Rechner, wo es geht, sonst in Docker-Containern.
 
 [English](README.md) · Offizielle [Hostwerk](https://github.com/Passimoritz/hostwerk-public)-Erweiterung (native Erweiterung, ab Hostwerk 2.11)
