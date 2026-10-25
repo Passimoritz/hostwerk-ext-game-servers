@@ -11,6 +11,15 @@ exports.activate = (host) => {
   const games = host.provide('games', new GameServers(host));
   games.art.routes(host.router); // /games/art before /games/:id
   games.routes(host.router);
+  // Dienst-Art „game“ und Beiträge (SDK 3.5): Übersicht, Dateien, Aufgaben, Bilder, Selbstwartung, Änderungsprotokoll
+  if (typeof host.serviceKind === 'function') host.serviceKind(require('./kind').gameKind(games));
+  if (typeof host.contribute === 'function') host.contribute('clickguard', { block: [/^\/games\/[^/]+\/(send|install)/, /^\/games$/, /^\/games\/steam\/apps\/refresh/, /^\/games\/[^/]+\/backups\/[^/]+\/restore/] }); // Klick-Test: wirkt außerhalb des Test-Ordners
+  if (typeof host.contribute === 'function') {
+    const name = (id) => { try { return games.get(id).name; } catch { return id; } };
+    host.contribute('advisor', { kind: 'game', label: 'Spiele-Server', open: { id: 'game', route: '/spiele' }, start: /valheim|rust\b|palworld|terraria|ark\b|satisfactory|counter-?strike|gmod|garry|zomboid|7 days|factorio|spieleserver|game ?server|steam/i }); // Berater „Was brauche ich?“
+    host.contribute('keeper', { catalogs: [{ id: 'lgsm', label: 'Spiele-Server (LinuxGSM-Serverliste)', text: 'täglich aus GitHub, Rückfall eingebaut' }] });
+    host.contribute('audit', { routes: [[/^\/games\/([^/]+)\/(start|stop|restart|update|validate|backup|install|command)$/, (m) => ({ kind: 'Spiele-Server', target: name(m[1]), action: { start: 'gestartet', stop: 'gestoppt', restart: 'neu gestartet', update: 'aktualisiert', validate: 'Dateien geprüft', backup: 'Backup erstellt', install: 'installiert', command: 'Befehl ausgeführt' }[m[2]], undo: ['start', 'stop'].includes(m[2]) ? { method: 'POST', path: `/games/${m[1]}/${m[2] === 'start' ? 'stop' : 'start'}`, label: m[2] === 'start' ? 'wieder stoppen' : 'wieder starten' } : null })]] });
+  }
   require('./extras').extras(games, host); // Meldungen (Absturz/Update, Discord), Spieler für andere Erweiterungen, Steam-Workshop
   // "Start with Hostwerk": native servers right away, Docker servers once the engine is ready (monitor tick)
   host.on('autostart', () => (process.env.HW_TEST ? [] : [() => games.startAutostart()]));

@@ -33,8 +33,11 @@
     "icon": "gamepad",
     "nav": {
       "group": "server",
-      "after": "mc"
-    }
+      "after": "ext:minecraft",
+      "area": "spiele",
+      "order": 20
+    },
+    "route": "spiele"
   },
   "backend": "server/index.js",
   "ui": "ui/index.js",
@@ -60,5 +63,13 @@
     "*": [
       "tabs"
     ]
-  }
+  },
+  "data": {
+    "settings": [
+      "games"
+    ]
+  },
+  "liveEvents": [
+    "games"
+  ]
 }

@@ -209,8 +209,10 @@ export default {
   // Seitenleiste: Punkt je Server (läuft/gestoppt), leere Liste = „noch keiner eingerichtet“ (Hostwerk zeigt dann einen gestrichelten Kreis)
   nav: {
     tip: (o) => {
-      const list = (o && Array.isArray(o.games)) ? o.games : [];
-      return { text: t('Game servers through SteamCMD or LinuxGSM – on this PC or in Docker containers.'), lines: list.map((g) => ({ name: g.name, state: isBusy(g.phase) ? 'starting' : g.running ? 'running' : 'stopped', text: isBusy(g.phase) ? (g.phase.text || t(PHASE_LABEL[g.phase.state])) : g.game || '' })) };
+      // Server aus Hostwerks Überblick (Dienst-Art „game“); ohne Angabe keine Punkte statt „noch keiner eingerichtet“
+      const kind = o && o.kinds && o.kinds.game;
+      const list = kind ? kind.items || [] : null;
+      return { text: t('Game servers through SteamCMD or LinuxGSM – on this PC or in Docker containers.'), lines: list && list.map((g) => ({ name: g.name, state: isBusy(g.phase) ? 'starting' : g.running ? 'running' : 'stopped', text: isBusy(g.phase) ? (g.phase.text || t(PHASE_LABEL[g.phase.state])) : g.game || '' })) };
     },
   },
 };
