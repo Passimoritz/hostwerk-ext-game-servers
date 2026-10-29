@@ -196,7 +196,7 @@ export function NetworkTab({ s }) {
   return (
     <div className="grid split-side">
       <div className="card"><div className="card-head"><ExternalLink size={16} /><h3>Ports</h3></div>
-        {details.ports.length === 0 ? <div className="card-body small muted">{isSteam(s) ? t('No ports known – set them under Settings → Start.') : t('No ports found (server installed?).')}</div> : details.ports.map((p, i) => <div key={i} className="list-item"><div className="grow small"><b>{t(p.name)}</b> <span className="mono">{p.port}/{p.proto}</span>{s.live && s.live.queryPort === p.port && <span className="badge gs-ml">{t('Query')}</span>}</div><a className="btn xs" href={`#/live/router?port=${p.port}&proto=${p.proto}&name=${encodeURIComponent(s.name)}`}>{t('Forward')}</a></div>)}
+        {details.ports.length === 0 ? <div className="card-body small muted">{isSteam(s) ? t('No ports known – set them under Settings → Start.') : t('No ports found (server installed?).')}</div> : details.ports.map((p, i) => <div key={i} className="list-item"><div className="grow small"><b>{t(p.name)}</b> <span className="mono">{p.port}/{p.proto}</span>{s.live && s.live.queryPort === p.port && <span className="badge gs-ml">{t('Query')}</span>}</div><a className="btn xs" href={`#/live/online/router?port=${p.port}&proto=${p.proto}&name=${encodeURIComponent(s.name)}`}>{t('Forward')}</a></div>)}
         <div className="card-body"><Connect s={s} /></div>
       </div>
       {isSteam(s) ? (
