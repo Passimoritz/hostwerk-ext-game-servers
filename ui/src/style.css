@@ -105,7 +105,12 @@
 .gs-editor { height: calc(100vh - 340px); min-height: 320px; display: flex; flex-direction: column; overflow: hidden; }
 .gs-start { align-items: start; }
 .gs-wide { max-width: none; }
-.gs-files { height: calc(100vh - 300px); overflow: hidden; }
+.gs-files { height: calc(100vh - 300px); overflow: hidden; display: flex; flex-direction: column; }
+/* Hinweis (Docker) über dem Datei-Browser: der Browser nimmt nur den Rest – sonst ragt er unten aus der Karte */
+.gs-files > :last-child { flex: 1 1 0; min-height: 0; }
+/* Brotkrumen: „Spiele-Server“ nie umbrechen, langer Servername endet mit … */
+.crumbs.gs-mb a { white-space: nowrap; flex: none; }
+.crumbs .gs-crumb-name { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gs-spin { margin-right: var(--sp-1); }
 .gs-warn { color: var(--warn-text); }
 .gs-num { width: calc(var(--sp-8) * 5); }

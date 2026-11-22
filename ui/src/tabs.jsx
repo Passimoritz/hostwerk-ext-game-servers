@@ -3,7 +3,8 @@ import { Gamepad2, Download, ShieldCheck, Archive, Plus, Trash2, TerminalSquare,
 import { get, post, del, useApi, waitJob, fmtBytes, fmtDate, openExternal, useRefresh, put } from '@hostwerk/api';
 import { Btn, Field, Empty, Loading, StatusPill, toast, confirmDialog, InfoTip, TileEmpty } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { BASE, cmdLabel, copy, fmtTime, isSteam, isBusy, busyReason, PhaseBar, stateOf, stateLabel } from './common';
+import { MemberCard } from './network';
+import { BASE, Keep, cmdLabel, copy, fmtTime, isSteam, isBusy, busyReason, PhaseBar, stateOf, stateLabel } from './common';
 
 /* Game servers – detail tabs of one server: overview, network, guides, console, players, workshop, schedule, backups, commands. */
 
@@ -61,8 +62,9 @@ export function OverviewTab({ s, reload, phase = null }) {
             <div className="card-head"><Gamepad2 size={16} /><h3>State</h3><div className="right"><StatusPill state={stateOf(s, null, phase)} label={stateLabel(s, null, phase)} /></div></div>
             <div className="card-body stack">
               {locked && <PhaseBar phase={phase} />}
-              {live && live.name && <div className="mc-motd small ellipsis" title="Name in the server list">{live.name}</div>}
+              {live && live.name && <div className="mc-motd small ellipsis" title="Name in the server list"><Keep>{live.name}</Keep></div>}
               <Connect s={s} />
+              <MemberCard s={s} kind="game" />
               {steam && s.steam && s.steam.adminPassword && <div className="row-tight tiny"><KeyRound size={13} className="muted" /><span className="muted">{t('Admin/RCON password:')}</span><code>{s.steam.adminPassword}</code><button className="btn ghost xs icon" title="Copy" aria-label={t('Copy')} onClick={() => navigator.clipboard.writeText(s.steam.adminPassword).then(() => toast.success('Copied'))}><Copy /></button></div>}
               {steam && s.steam && s.steam.note && <div className="info-line"><Info size={13} /><span>{s.steam.note}</span></div>}
             </div>
@@ -181,7 +183,7 @@ export function PlayersTab({ s }) {
     <div className="card">
       <div className="card-head"><Users size={16} /><h3>Online</h3><span className="small muted">{d.live.players} / {d.live.maxPlayers}{d.live.bots ? ` · ${t('{n} bots', { n: d.live.bots })}` : ''}</span></div>
       {named.length === 0 ? <div className="card-body small muted">{d.live.players > 0 ? t('Players are connecting right now (no names yet).') : t('Nobody is online right now.')}</div> : named.sort((a, b) => b.seconds - a.seconds).map((p) => (
-        <div key={p.name} className="list-item"><Users size={15} className="muted" /><div className="grow small"><b>{p.name}</b></div><span className="tiny muted">{p.score ? `${t('{n} points', { n: p.score })} · ` : ''}{t('{time} online', { time: fmtTime(p.seconds) })}</span></div>
+        <div key={p.name} className="list-item"><Users size={15} className="muted" /><div className="grow small"><b><Keep>{p.name}</Keep></b></div><span className="tiny muted">{p.score ? `${t('{n} points', { n: p.score })} · ` : ''}{t('{time} online', { time: fmtTime(p.seconds) })}</span></div>
       ))}
     </div>
   );

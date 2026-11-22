@@ -167,7 +167,8 @@ class GameArt {
   routes(r) {
     r.get('/games/art', async (req, res) => {
       const hit = await this.resolve(req.query || {}).catch(() => null);
-      if (!hit) return res.status(404).end();
+      // Kein Bild bekannt: 204 statt 404 – das Bild fällt trotzdem auf das Monogramm zurück, aber ohne Fehler in der Konsole
+      if (!hit) { res.setHeader('Cache-Control', 'private, max-age=3600'); return res.status(204).end(); }
       res.setHeader('Content-Type', hit.type);
       res.setHeader('Cache-Control', 'private, max-age=86400');
       res.setHeader('X-Content-Type-Options', 'nosniff');

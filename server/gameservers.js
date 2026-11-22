@@ -352,6 +352,9 @@ class GameServers {
       const mode = b.mode === 'docker' || b.mode === 'native' ? b.mode : IS_LINUX ? 'native' : 'docker';
       if (mode === 'native') this.requireLinux();
       if (!/^[a-z0-9]+server$|^[a-z0-9]+$/.test(String(b.game || ''))) throw Object.assign(new Error(T('Invalid game')), { status: 400 });
+      // Only games LinuxGSM knows – otherwise a server entry and a failing job would stay behind (no list at hand: allow)
+      const known = await this.games().catch(() => []);
+      if (known.length && !known.some((g) => g.game === String(b.game))) throw Object.assign(new Error(T('Invalid game')), { status: 400 });
       needsDocker = mode === 'docker';
       if (needsDocker && !b.installDocker && !(await this.dockerInstalled())) throw dockerMissing(b.name);
       const id = `${String(b.game).replace(/server$/, '')}-${crypto.randomBytes(2).toString('hex')}`;
@@ -401,8 +404,8 @@ class GameServers {
   /** Popular games with the best way for this system (for the empty page). */
   async quickPicks() {
     const platform = hostPlatform();
-    const docker = await this.dockerAvailable().catch(() => false);
-    const dockerInstalled = docker || (await this.dockerInstalled().catch(() => false));
+    const docker = (await this.dockerQuick()) === true;
+    const dockerInstalled = docker || (await this.dockerQuick(4000, () => this.dockerInstalled())) === true;
     return { platform, linux: IS_LINUX, docker, dockerInstalled, picks: PICKS.map((x) => pickFor(x, platform)).filter(Boolean) };
   }
 
@@ -854,10 +857,12 @@ class GameServers {
   async live(s) {
     if (!s.running) return null;
     this.liveCache = this.liveCache || new Map();
-    const c = this.liveCache.get(s.id);
-    if (c && Date.now() - c.at < (c.v ? 10000 : 60000)) return c.v; // ask less often without an answer
-    let v = null;
     const cands = this.queryCandidates(s).slice(0, 4);
+    // Same ports and same run as last time: the cached answer (other ports or a new start ask again right away)
+    const key = `${cands.join(',')}|${s.startedAt || ''}`;
+    const c = this.liveCache.get(s.id);
+    if (c && c.key === key && Date.now() - c.at < (c.v ? 10000 : 60000)) return c.v; // ask less often without an answer
+    let v = null;
     const { queryInfo } = core('a2s');
     const answers = await Promise.all(cands.map((port) => queryInfo('127.0.0.1', port, 700).catch(() => null)));
     const k = answers.findIndex(Boolean);
@@ -867,7 +872,7 @@ class GameServers {
     if (v && ph && ph.result && ph.result.state !== 'ready') { ph.tracker.markReady('query'); ph.result = ph.tracker.result({ health: null }); this.broadcast({ type: 'games' }); }
     // Neue Spielversion (z. B. nach dem automatischen Update) – einmal melden
     if (v && v.version && s.lastVersion !== v.version) { if (s.lastVersion) this.alert('update', T('{name} now runs version {version}.', { name: s.name, version: v.version }), 'info'); s.lastVersion = v.version; this.ctx.settings.save(); }
-    this.liveCache.set(s.id, { at: Date.now(), v });
+    this.liveCache.set(s.id, { at: Date.now(), v, key });
     // No port details yet: read "details" once in the background (LinuxGSM knows the game's ports)
     if (!s.detail && !this.detailBusy && s.installed && !this.isSteam(s) && !PH.isBusy(this.phaseNow(s))) { this.detailBusy = true; this.details(s).catch(() => {}).finally(() => { this.detailBusy = false; }); }
     return v;
@@ -912,6 +917,15 @@ class GameServers {
   }
   async infoLive(s) { const i = this.info(s); i.live = await this.live(s).catch(() => null); return i; }
   async dockerAvailable() { try { await this.ctx.docker.cli(); return true; } catch { return false; } }
+  /**
+   * For page loads: Docker's answer within a few seconds – null = unknown (a WSL engine that is off can take up to a
+   * minute to say so; the page must not hang on that). The question keeps running and fills Hostwerk's cache.
+   */
+  async dockerQuick(ms = 4000, ask = () => this.dockerAvailable()) {
+    let timer;
+    const slow = new Promise((res) => { timer = setTimeout(() => res(null), ms); if (timer.unref) timer.unref(); });
+    try { return await Promise.race([ask().catch(() => false), slow]); } finally { clearTimeout(timer); }
+  }
   /** Docker there (CLI or Hostwerk's WSL engine), even if the engine is not running right now. */
   async dockerInstalled() { try { const st = await this.ctx.docker.status(); return !!(st.cli || st.wslAvailable); } catch { return false; } }
 
@@ -1117,8 +1131,18 @@ class GameServers {
 
   routes(r) {
     r.get('/games', async (req, res) => {
-      const docker = await this.dockerAvailable(); const dockerInstalled = docker || await this.dockerInstalled();
-      for (const s of this.list()) { if ((this.isSteam(s) && !this.isDocker(s)) || IS_LINUX || (docker && this.isDocker(s))) await this.refresh(s).catch(() => {}); else if (this.isDocker(s)) s.running = false; } // engine off → containers cannot run (no stale state)
+      // ?fast=1: the list right away without asking Docker (2–4 s with the WSL engine) – Docker servers keep their last
+      // known state, docker is null (“still checking”); the page asks again without fast and fills it in
+      if (req.query.fast === '1') {
+        for (const s of this.list()) { if (!this.isDocker(s) && (this.isSteam(s) || IS_LINUX)) await this.refresh(s).catch(() => {}); if (!s.gameName) this.rememberGameName(s); }
+        const servers = await Promise.all(this.list().map((s) => (this.isDocker(s) ? { ...this.info(s), live: null } : this.infoLive(s))));
+        return res.json({ linux: IS_LINUX, docker: null, dockerInstalled: null, pending: this.list().some((s) => this.isDocker(s)), servers, requirements: await this.requirements().catch(() => null) });
+      }
+      // Docker only when a server uses it – and never wait long for it (null = engine answers slowly: keep the last state)
+      const anyDocker = this.list().some((s) => this.isDocker(s));
+      const docker = anyDocker ? await this.dockerQuick() : false;
+      const dockerInstalled = docker === true || (anyDocker && docker === false && (await this.dockerQuick(4000, () => this.dockerInstalled())) === true);
+      for (const s of this.list()) { if (this.isDocker(s) ? docker === true : this.isSteam(s) || IS_LINUX) await this.refresh(s).catch(() => {}); else if (this.isDocker(s) && docker === false) s.running = false; } // engine off → containers cannot run (no stale state)
       for (const s of this.list()) if (!s.gameName) this.rememberGameName(s);
       res.json({ linux: IS_LINUX, docker, dockerInstalled, servers: await Promise.all(this.list().map((s) => this.infoLive(s))), requirements: await this.requirements().catch(() => null) });
     });
@@ -1143,7 +1167,7 @@ class GameServers {
     r.post('/games/import', async (req, res) => res.json(await this.adopt(req.body || {})));
     r.post('/games/steam/apps/refresh', async (req, res) => { await this.apps.refresh({ force: !!(req.body || {}).force }); res.json(this.apps.state()); });
     r.post('/games', async (req, res) => res.json(await this.setup(req.body || {})));
-    r.get('/games/:id', async (req, res) => { const s = this.get(req.params.id); if (this.isDocker(s) && !(await this.dockerAvailable())) s.running = false; else if (this.isSteam(s) || IS_LINUX || this.isDocker(s)) await this.refresh(s).catch(() => {}); res.json(await this.infoLive(s)); });
+    r.get('/games/:id', async (req, res) => { const s = this.get(req.params.id); const docker = this.isDocker(s) ? await this.dockerQuick() : null; if (docker === false) s.running = false; else if (docker === true || (!this.isDocker(s) && (this.isSteam(s) || IS_LINUX))) await this.refresh(s).catch(() => {}); res.json(await this.infoLive(s)); });
     r.get('/games/:id/quick', async (req, res) => { const s = this.get(req.params.id); res.json(this.isSteam(s) ? { steam: true } : await this.quickGet(s)); });
     r.put('/games/:id/quick', async (req, res) => { const s = this.get(req.params.id); res.json(this.isSteam(s) ? this.steamSet(s, req.body || {}) : await this.quickSet(s, req.body || {})); });
     r.put('/games/:id/limits', async (req, res) => res.json(await this.setLimits(this.get(req.params.id), req.body || {})));

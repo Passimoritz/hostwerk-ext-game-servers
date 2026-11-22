@@ -5,7 +5,7 @@ import { Btn, Tabs, Seg, Empty, Loading, Callout, StatusPill, Progress, toast, c
 import { serviceMenu, useNew, FavMark, FavButton, favSort, ServiceButtons, AddTile, useExtContrib, ExtTabView, askDockerAutostart, useAreaTabs } from '@hostwerk/kit';
 import { FileBrowser } from '@hostwerk/files';
 import { t } from '@hostwerk/i18n';
-import { BASE, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable, phaseOf, isBusy, PhaseBar, PHASE_LABEL } from './common';
+import { BASE, Keep, GameIcon, POPULAR, copy, goServer, innerJob, isInstalling, isSteam, methodLabel, stateLabel, stateOf, readable, phaseOf, isBusy, PhaseBar, PHASE_LABEL } from './common';
 import { CreateDialog, QuickStart, SetupSteps } from './setup';
 import { BackupsTab, CommandsTab, ConsoleTab, GuidesCard, GuidesTab, NetworkTab, OverviewTab, PlayersTab, ScheduleTab, useRun, WorkshopTab } from './tabs';
 import { LgsmConfig, SettingsTab, SteamConfig } from './settings';
@@ -77,9 +77,9 @@ function Server({ s, tab, reload }) {
     <div className={`page fade-in ${cur === 'files' ? 'gs-wide' : ''}`}>
       <div className="page-head">
         <div>
-          <div className="crumbs small gs-mb"><a href={BASE}>{t('Game servers')}</a><span>/</span>{s.name}</div>
-          <h1><GameIcon s={s} className="ico" size={30} /> {s.name} <FavButton kind="game" id={s.id} /> <StatusPill state={stateOf(s, job, phase)} label={stateLabel(s, job, phase)} /></h1>
-          <p>{s.gameName || s.script}{s.live && s.live.version ? ` ${s.live.version}` : ''} · {methodLabel(s)}{s.address ? ` · ${t('Port {port}', { port: s.address.port })}` : ''}{s.live ? ` · ${t('{n}/{max} players', { n: s.live.players, max: s.live.maxPlayers })}` : ''}</p>
+          <div className="crumbs small gs-mb"><a href={BASE}>{t('Game servers')}</a><span>/</span><span className="gs-crumb-name" title={s.name}><Keep>{s.name}</Keep></span></div>
+          <h1><GameIcon s={s} className="ico" size={30} /> <Keep>{s.name}</Keep> <FavButton kind="game" id={s.id} /> <StatusPill state={stateOf(s, job, phase)} label={stateLabel(s, job, phase)} /></h1>
+          <p><Keep>{s.gameName || s.script}{s.live && s.live.version ? ` ${s.live.version}` : ''}</Keep> · {methodLabel(s)}{s.address ? ` · ${t('Port {port}', { port: s.address.port })}` : ''}{s.live ? ` · ${t('{n}/{max} players', { n: s.live.players, max: s.live.maxPlayers })}` : ''}</p>
         </div>
         <div className="actions">
           {isElectron && !s.docker && <Btn className="ghost" icon={ExternalLink} onClick={() => post('/app/open-path', { path: s.dir })}>Folder</Btn>}
@@ -125,16 +125,16 @@ function GameCard({ s, installing, phase, reload }) {
         <GameIcon s={s} className="mc-list-icon" size={40} />
         <FavMark kind="game" id={s.id} />
         <div className="grow gs-min">
-          <div className="svc-title ellipsis">{s.name}</div>
-          <div className="small muted ellipsis"><b>{s.gameName || s.script}</b>{live && live.version ? ` ${live.version}` : ''} · {methodLabel(s)}</div>
+          <div className="svc-title ellipsis"><Keep>{s.name}</Keep></div>
+          <div className="small muted ellipsis"><b><Keep>{s.gameName || s.script}</Keep></b><Keep>{live && live.version ? ` ${live.version}` : ''}</Keep> · {methodLabel(s)}</div>
         </div>
         <StatusPill state={state} label={stateLabel(s, installing, phase)} />
       </div>
-      {live && live.name && <div className="mc-motd small ellipsis">{live.name}</div>}
+      {live && live.name && <div className="mc-motd small ellipsis"><Keep>{live.name}</Keep></div>}
       <div className="svc-meta">
         <div><div className="k">{t('Address')}</div><div className="v mono small">{s.address ? s.address.local : '–'}</div></div>
         <div><div className="k">{t('Players')}</div><div className="v">{live ? `${live.players} / ${live.maxPlayers}` : '–'}</div></div>
-        {live && live.map && <div><div className="k">{t('Map')}</div><div className="v ellipsis small">{live.map}</div></div>}
+        {live && live.map && <div><div className="k">{t('Map')}</div><div className="v ellipsis small"><Keep>{live.map}</Keep></div></div>}
       </div>
       {s.installed && busy && <PhaseBar phase={phase} compact />}
       <div className="svc-actions" onClick={(e) => e.stopPropagation()}>
@@ -154,7 +154,10 @@ const useGameTabs = typeof useAreaTabs === 'function' ? () => useAreaTabs('games
 export function GamesPage({ path = [], ext }) {
   const [id, tab] = path;
   const areaTabs = useGameTabs();
-  const d = useApi('/games', [], { live: false, poll: true });
+  const full = useApi('/games', [], { live: false, poll: true });
+  // Erst die schnelle Liste (ohne Docker-Abfrage), dann die vollständige – mit WSL-Engine dauert die 2–4 s
+  const quick = useApi('/games?fast=1', [], { live: false });
+  const d = full.data || full.error || !quick.data ? full : { ...full, data: quick.data };
   const [create, setCreate] = useState(false);
   const jobs = useStore((st) => st.jobs || {});
   useNew('game', () => setCreate(true));
@@ -181,7 +184,7 @@ export function GamesPage({ path = [], ext }) {
       </div>
       <AddonTabs ext={ext}>
       <Tabs value={importing ? 'import' : xCur ? xCur.id : 'servers'} onChange={(v) => { location.hash = v === 'servers' ? BASE.slice(1) : `${BASE.slice(1)}/${v}`; }} tabs={[{ id: 'servers', label: t('Servers'), icon: Gamepad2, badge: servers.length }, { id: 'import', label: t('Import'), icon: FolderInput, title: t('Take over game servers that already exist on this PC') }, ...areaTabs.map(({ id: xid, label, icon }) => ({ id: xid, label, icon }))]} />
-      {!linux && !docker && dockerInstalled && servers.some((s) => s.docker) && <Callout kind="warn" icon={Monitor} title="The Docker engine is not running right now" dismissible={false}>Servers in Docker containers need the engine. <Btn className="sm primary gs-ml" icon={Play} onClick={startDocker}>Start Docker</Btn></Callout>}
+      {!linux && docker === false && dockerInstalled && servers.some((s) => s.docker) && <Callout kind="warn" icon={Monitor} title="The Docker engine is not running right now" dismissible={false}>Servers in Docker containers need the engine. <Btn className="sm primary gs-ml" icon={Play} onClick={startDocker}>Start Docker</Btn></Callout>}
       {linux && requirements && (requirements.missing.length > 0 || requirements.root) && (
         <Callout kind="warn" title="Requirements" dismissible={false}>
           {requirements.root && <div className="small">{requirements.rootWarning}</div>}

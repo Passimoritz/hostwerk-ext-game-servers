@@ -299,6 +299,7 @@ test('steam server: start uses an argument array (no shell), detached only outsi
   const calls = [];
   g.steam.spawn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); const c = new EventEmitter(); c.pid = 999999; c.exitCode = null; c.unref = () => {}; return c; };
   g.steam.alive = async () => false;
+  g.steam.busyPorts = async () => [];
   const r = await g.steam.start(null, s);
   assert.ok(r.ok);
   assert.strictEqual(calls[0].cmd, exe);
@@ -345,4 +346,35 @@ test('the server instance can be created twice without sharing state (no leaked 
   const b = new SteamServers({ ctx: { paths: {} }, dataDir: '/b' }, null);
   assert.notStrictEqual(a.children, b.children);
   assert.strictEqual(a.dataDir, '/a');
+});
+
+test('steam server: a taken port stops the start with a clear message (who uses it), nothing is spawned', async () => {
+  const h = fakeHost();
+  const g = new GameServers(h);
+  const s = g.steam.create({ appid: 896660, name: 'Club' }, { appid: 896660, win: true, linux: true });
+  s.installed = true;
+  const exe = path.join(g.dir(s), s.platform === 'linux' ? 'valheim_server.x86_64' : 'valheim_server.exe');
+  fs.mkdirSync(path.dirname(exe), { recursive: true }); fs.writeFileSync(exe, '');
+  let spawned = 0;
+  g.steam.spawn = () => { spawned++; return null; };
+  g.steam.alive = async () => false;
+  g.steam.busyPorts = async (ports) => [{ port: Number(ports[0].port), proto: 'UDP', pid: 4242, name: 'valheim_server.exe' }];
+  await assert.rejects(g.steam.start(null, s), (e) => e.status === 409 && /4242/.test(e.message) && /valheim_server.exe/.test(e.message));
+  assert.strictEqual(spawned, 0);
+});
+
+test('port check reads netstat (Windows) and ss (Linux) without listening itself', async () => {
+  const { busyPorts, parseNetstat, parseSs } = require('../server/portcheck');
+  const tcp = ["  Proto  Lokale Adresse  Remoteadresse  Status  PID", "  TCP    0.0.0.0:2457   0.0.0.0:0   ABHÖREN   11", "  TCP    10.0.0.2:5000  1.2.3.4:443  HERGESTELLT  12"].join('\n');
+  const udp = ["  UDP    0.0.0.0:2456   *:*   77", "  UDP    [::]:2458  *:*  78"].join('\n');
+  assert.deepStrictEqual([...parseNetstat(tcp, "TCP")], [[2457, 11]]);
+  assert.deepStrictEqual([...parseNetstat(udp, "UDP")], [[2456, 77], [2458, 78]]);
+  const exec = async (cmd, args) => (cmd === "tasklist" ? "\"valheim_server.exe\",\"77\",\"Console\",\"1\",\"100 K\"" : args.includes("UDP") ? udp : tcp);
+  const hits = await busyPorts([{ port: 2456, proto: "UDP" }, { port: 2457, proto: "TCP/UDP" }, { port: 5000, proto: "TCP" }], { exec, win: true });
+  assert.deepStrictEqual(hits, [{ port: 2456, proto: "UDP", pid: 77, name: "valheim_server.exe" }, { port: 2457, proto: "TCP", pid: 11, name: "" }]);
+  const ss = ["udp UNCONN 0 0 0.0.0.0:27015 0.0.0.0:* users:((\"srcds_linux\",pid=900,fd=5))", "tcp LISTEN 0 128 0.0.0.0:27015 0.0.0.0:*"].join('\n');
+  const m = parseSs(ss);
+  assert.deepStrictEqual(m.udp.get(27015), { pid: 900, name: 'srcds_linux' });
+  assert.strictEqual(m.tcp.get(27015).pid, 0);
+  assert.deepStrictEqual(await busyPorts([], { exec }), []);
 });

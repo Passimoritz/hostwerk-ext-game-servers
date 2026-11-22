@@ -94,7 +94,7 @@ class GameNetwork {
   /** Everything that can be part of a network: game servers (extension) and Minecraft servers (Hostwerk). */
   candidates() {
     const out = [];
-    for (const s of (this.ctx.games ? this.ctx.games.list() : [])) out.push({ kind: 'game', id: s.id, name: s.name, game: s.gameName || s.game, running: !!s.running, proxy: false });
+    for (const s of (this.ctx.games ? this.ctx.games.list() : [])) out.push({ kind: 'game', id: s.id, name: s.name, game: s.gameName || s.game, running: !!s.running, proxy: false, players: s.running ? this.gamePlayers(s.id) : 0 });
     const mc = this.ctx.minecraft;
     if (mc) for (const s of mc.list()) out.push({ kind: 'mc', id: s.id, name: s.name, game: 'Minecraft', type: s.type, running: this.mcRunning(s.id), proxy: mc.isProxy(s), players: this.mcPlayers(s.id) });
     return out;
@@ -121,6 +121,8 @@ class GameNetwork {
     if (m.kind === 'game') { if (job) job.log(`… ${this.T('{name} does not answer the server query – carrying on', { name: m.name })}`); return true; }
     throw new Error(this.T('{name} did not get ready in time', { name: m.name }));
   }
+  /** Players of a game server from its last server query (cached by the game servers, no waiting) – 0 without an answer. */
+  gamePlayers(id) { const c = this.ctx.games && this.ctx.games.liveCache && this.ctx.games.liveCache.get(id); return (c && c.v && Number(c.v.players)) || 0; }
   mcPlayers(id) { try { const p = this.ctx.minecraft.proc(id); return (p.extra && p.extra.playerCount) || 0; } catch { return 0; } }
   member(m) {
     const c = this.candidates().find((x) => x.kind === m.kind && x.id === m.id);
@@ -139,13 +141,17 @@ class GameNetwork {
   }
 
   /* ---------- groups ---------- */
-  clean(b) {
+  /** prev = members the network already had: those may stay even if their server is gone (shown as removed). */
+  clean(b, prev = []) {
     const name = String(b.name || '').trim().slice(0, 60);
     if (!name) throw Object.assign(new Error(this.T('Please give the network a name.')), { status: 400 });
     const members = [];
+    const known = this.candidates();
     for (const m of Array.isArray(b.members) ? b.members : []) {
       if (!m || !['game', 'mc'].includes(m.kind) || typeof m.id !== 'string') continue;
-      if (!members.some((x) => x.kind === m.kind && x.id === m.id)) members.push({ kind: m.kind, id: m.id });
+      const has = (l) => l.some((x) => x.kind === m.kind && x.id === m.id);
+      if (!has(known) && !has(prev)) throw Object.assign(new Error(this.T('Unknown server “{id}” – it does not exist (any more).', { id: m.id.slice(0, 60) })), { status: 400 });
+      if (!has(members)) members.push({ kind: m.kind, id: m.id });
     }
     const delay = Math.max(0, Math.min(120, Number(b.delay) || 0));
     const r = b.restart && typeof b.restart === 'object' ? b.restart : {};
@@ -159,7 +165,7 @@ class GameNetwork {
     this.list().push(g); this.ctx.settings.save();
     return this.view(g);
   }
-  update(id, b) { const g = this.get(id); Object.assign(g, this.clean({ ...g, ...(b || {}) })); this.ctx.settings.save(); return this.view(g); }
+  update(id, b) { const g = this.get(id); Object.assign(g, this.clean({ ...g, ...(b || {}) }, g.members)); this.ctx.settings.save(); return this.view(g); }
   remove(id) { this.get(id); this.cfg.groups = this.list().filter((x) => x.id !== id); this.ctx.settings.save(); }
   fromProxy(proxyId) {
     const p = this.proxies().find((x) => x.id === proxyId);

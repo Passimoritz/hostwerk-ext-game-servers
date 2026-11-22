@@ -67,6 +67,11 @@ test('groups live in settings.gameNetwork; names and members are checked', () =>
   assert.strictEqual(g.members.length, 1, 'duplicates and unknown kinds dropped');
   assert.strictEqual(g.delay, 120, 'pause capped');
   assert.strictEqual(n.update(g.id, { name: 'Spieleabend' }).name, 'Spieleabend');
+  // Unbekannte Mitglieds-IDs: beim Anlegen und als neues Mitglied abgelehnt, ein schon vorhandenes (später gelöschtes) bleibt erlaubt
+  assert.throws(() => n.create({ name: 'X', members: [{ kind: 'mc', id: 'gibtsnicht' }] }), (e) => e.status === 400 && /gibtsnicht/.test(e.message));
+  assert.throws(() => n.update(g.id, { members: [...g.members, { kind: 'game', id: 'weg' }] }), (e) => e.status === 400);
+  h.S.gameNetwork.groups[0].members.push({ kind: 'game', id: 'geloescht' });
+  assert.strictEqual(n.update(g.id, { name: 'Spieleabend 2' }).members.length, 2);
   n.remove(g.id);
   assert.throws(() => n.get(g.id), /Verbund nicht gefunden/);
 });

@@ -839,5 +839,8 @@
   "{n} player": "{n} Spieler",
   "{n} conflict": "{n} Konflikt",
   "{n} conflicts": "{n} Konflikte",
-  "forwarded": "freigegeben"
+  "forwarded": "freigegeben",
+  "Unknown server “{id}” – it does not exist (any more).": "Unbekannter Server „{id}“ – den gibt es nicht (mehr).",
+  "another program": "einem anderen Programm",
+  "Port {port}/{proto} is already in use by {who} – maybe an old instance of this server is still running. End it (e.g. in the Task Manager) or change the port under Settings.": "Port {port}/{proto} ist schon belegt von {who} – vielleicht läuft noch eine alte Instanz dieses Servers. Beende sie (z. B. im Task-Manager) oder ändere den Port unter Einstellungen."
 }

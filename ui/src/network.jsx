@@ -7,6 +7,7 @@ import { t, pl } from '@hostwerk/i18n';
 
 /* Game servers, part “Network” (until 1.3 the own extension “Game server network”) – tab on the game servers page. */
 import { AddonTabs } from './addons';
+import { NETWORK, Keep } from './common';
 
 /*
  * Game server network: groups of game servers (and single Minecraft servers) – a cluster, several instances of one game or
@@ -48,7 +49,7 @@ function Editor({ init, candidates, onClose, onSaved }) {
               <label key={`${c.kind}:${c.id}`} className={`gn-pick-item ${idx(c) >= 0 ? 'gn-picked' : ''}`}>
                 <input type="checkbox" checked={idx(c) >= 0} onChange={() => toggle(c)} />
                 {c.kind === 'mc' ? <Box size={15} aria-hidden="true" /> : <Gamepad2 size={15} aria-hidden="true" />}
-                <span className="grow ellipsis"><b>{c.name}</b> <span className="tiny muted">{c.game}{c.proxy ? ` · ${t('proxy')}` : ''}</span></span>
+                <span className="grow ellipsis"><b><Keep>{c.name}</Keep></b> <span className="tiny muted"><Keep>{c.game}</Keep>{c.proxy ? ` · ${t('proxy')}` : ''}</span></span>
               </label>
             ))}
           </div>
@@ -91,7 +92,7 @@ function Overview({ g, reload, onEdit }) {
   return (
     <div className="stack">
       <div className="card">
-        <div className="card-head"><Waypoints size={16} aria-hidden="true" /><h3 className="ellipsis">{g.name}</h3>
+        <div className="card-head"><Waypoints size={16} aria-hidden="true" /><h3 className="ellipsis"><Keep>{g.name}</Keep></h3>
           <StatusPill state={STATE[g.state]} label={g.state === 'partial' ? t('{n} of {total} running', { n: g.running, total: g.total }) : undefined} />
           <span className="small muted"><Users size={12} aria-hidden="true" /> {pl(total, '{n} player', '{n} players')}</span>
           <div className="right row-tight"><button type="button" className="btn ghost xs icon" title={t('Edit')} aria-label={t('Edit')} onClick={onEdit}><Pencil /></button></div>
@@ -112,7 +113,7 @@ function Overview({ g, reload, onEdit }) {
               <li key={`${m.kind}:${m.id}`} className={m.running ? 'gn-on' : ''}>
                 <span className="gn-dot" aria-hidden="true" />
                 {m.kind === 'mc' ? <Box size={14} aria-hidden="true" /> : <Gamepad2 size={14} aria-hidden="true" />}
-                {m.missing ? <span className="muted grow">{t('{name} (removed)', { name: m.name })}</span> : <a className="grow ellipsis" href={hrefOf(m)}>{m.name}</a>}
+                {m.missing ? <span className="muted grow">{t('{name} (removed)', { name: m.name })}</span> : <a className="grow ellipsis" href={hrefOf(m)}><Keep>{m.name}</Keep></a>}
                 {m.proxy && <span className="badge">{t('proxy')}</span>}
                 {p && m.running && <span className="small muted">{p.max ? t('{n} of {max}', { n: p.players, max: p.max }) : pl(p.players, '{n} player', '{n} players')}</span>}
                 <span className="gn-sr">{m.running ? t('running') : t('stopped')}</span>
@@ -175,7 +176,7 @@ function Shared({ g }) {
           <Field label={t('Player slots')}><input className="input sm" type="number" min={1} max={1000} value={slots} onChange={(e) => setSlots(e.target.value)} /></Field>
         </div>
         <div className="row-tight"><Btn className="sm primary" busy={busy} disabled={pw === '' && slots === ''} onClick={apply}>Apply to all servers</Btn></div>
-        {res && <ul className="gn-results">{res.map((x) => <li key={x.name} className={x.ok ? 'gn-ok-line' : 'gn-err-line'}>{x.ok ? '✓' : '✗'} {x.name}{x.why ? ` – ${x.why}` : ''}{x.note ? ` – ${x.note}` : ''}</li>)}</ul>}
+        {res && <ul className="gn-results">{res.map((x) => <li key={x.name} className={x.ok ? 'gn-ok-line' : 'gn-err-line'}>{x.ok ? '✓' : '✗'} <Keep>{x.name}</Keep>{x.why ? ` – ${x.why}` : ''}{x.note ? ` – ${x.note}` : ''}</li>)}</ul>}
       </div>
     </div>
   );
@@ -211,7 +212,7 @@ function Ports({ g }) {
                 <tr key={`${x.id}:${x.port}/${x.proto}`}>
                   <td>{x.member}</td>
                   <td className="mono">{x.port}/{x.proto}</td>
-                  <td className="small muted">{x.name}</td>
+                  <td className="small muted"><Keep>{x.name}</Keep></td>
                   <td className="small">{x.conflict.length ? <span className="gn-err-line">{t('also used by {list}', { list: x.conflict.join(', ') })}</span> : x.forwarded ? t('forwarded') : '–'}</td>
                 </tr>
               ))}
@@ -284,25 +285,25 @@ function PlayersTile() {
   if (!d.data && d.error) return <TileEmpty icon={AlertTriangle} text={t('Could not load: {error}', { error: d.error })} action="Try again" onClick={() => d.reload()} />;
   if (!d.data) return <div className="card-body"><div className="hw-skeleton gn-skel" /></div>;
   const x = d.data;
-  if (!x.networks) return <TileEmpty icon={Waypoints} text="No network yet" href="#/ext/game-network" />;
+  if (!x.networks) return <TileEmpty icon={Waypoints} text="No network yet" href={NETWORK} />;
   return (
-    <a className="card-body stack gn-tile" href="#/ext/game-network">
+    <a className="card-body stack gn-tile" href={NETWORK}>
       <div className="row-tight"><Users size={16} aria-hidden="true" /><b className="gn-big">{x.players.toLocaleString(document.documentElement.lang === 'en' ? 'en-US' : 'de-DE')}</b><span className="small muted">{t('players online')}</span></div>
       <div className="small muted">{t('{running} of {servers} servers running in {networks} networks', x)}</div>
     </a>
   );
 }
 
-/** On a Minecraft server's page: which network it belongs to – with its state. */
-function MemberCard({ s }) {
-  const d = useApi(s ? `/game-network/member/mc/${encodeURIComponent(s.id)}` : null, [s && s.id], { live: false, poll: true });
+/** On a Minecraft server's (kind 'mc') or a game server's page (kind 'game'): which network it belongs to – with its state. */
+function MemberCard({ s, kind = 'mc' }) {
+  const d = useApi(s ? `/game-network/member/${kind}/${encodeURIComponent(s.id)}` : null, [s && s.id, kind], { live: false, poll: true });
   const groups = d.data || [];
   if (!groups.length) return null;
   return (
     <div className="stack gn-gap">
       {groups.map((x) => (
         <div key={x.id} className="row-tight gn-wrap">
-          <Waypoints size={15} aria-hidden="true" /><span className="small">{t('Part of the network')} <a href="#/ext/game-network"><b>{x.name}</b></a></span>
+          <Waypoints size={15} aria-hidden="true" /><span className="small">{t('Part of the network')} <a href={NETWORK}><b><Keep>{x.name}</Keep></b></a></span>
           <StatusPill state={STATE[x.state]} label={x.state === 'partial' ? t('{n} of {total} running', { n: x.running, total: x.total }) : undefined} />
           {x.players > 0 && <span className="tiny muted">{t('{n} players', { n: x.players })}</span>}
         </div>

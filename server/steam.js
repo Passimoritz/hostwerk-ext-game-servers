@@ -19,6 +19,7 @@ const cp = require('child_process');
 const G = require('./steamgames');
 const { rconExec } = require('./rcon');
 const { SteamMeter, parseSteamLine } = require('./phase');
+const { busyPorts } = require('./portcheck');
 
 const IS_WIN = process.platform === 'win32';
 const STEAMCMD_URL = { win32: 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip', linux: 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' };
@@ -110,6 +111,7 @@ class SteamServers {
     if (host && typeof host.t === 'function') T = (s, v) => host.t(s, v);
     this.ctx = gs.ctx;
     this.spawn = cp.spawn; // tests replace it
+    this.busyPorts = busyPorts; // tests replace it
     this.children = new Map(); // id → child process started in this session
     this.restarts = new Map(); // id → [timestamps] (monitor: at most 3 restarts in 30 min)
   }
@@ -325,6 +327,13 @@ class SteamServers {
     const spec = this.startSpec(s);
     if (!fs.existsSync(spec.exe)) throw new Error(this.T('Start program not found: {exe} – install again or set it under Settings.', { exe: path.relative(this.dir(s), spec.exe) }));
     if (!IS_WIN) { try { fs.chmodSync(spec.exe, 0o755); } catch { /* not ours */ } }
+    // Port already taken (often an orphaned instance of this server, or another program): say so clearly instead of a vague crash
+    const busy = await this.busyPorts(G.portsFor(s)).catch(() => []);
+    if (busy.length) {
+      const b = busy[0];
+      const who = b.name ? `${b.name}${b.pid ? ` (PID ${b.pid})` : ''}` : b.pid ? `PID ${b.pid}` : this.T('another program');
+      throw Object.assign(new Error(this.T('Port {port}/{proto} is already in use by {who} – maybe an old instance of this server is still running. End it (e.g. in the Task Manager) or change the port under Settings.', { port: b.port, proto: b.proto, who })), { status: 409, busy });
+    }
     // Keep the console output: the last run stays as .1
     const log = this.logFile(s);
     try { if (fs.existsSync(log) && fs.statSync(log).size > 0) fs.renameSync(log, `${log}.1`); } catch { /* in use */ }
@@ -517,6 +526,8 @@ class SteamServers {
   run(s, command) {
     const { runJob } = this.core('jobs');
     const label = this.gs.label(command);
+    // Unknown command: answer right away (no job that only fails)
+    if (!/^(start|stop|kill|restart|install|auto-install|update|validate|force-update|backup|monitor)$/.test(String(command))) throw Object.assign(new Error(this.T('Steam servers know start, stop, restart, update, validate and backup.')), { status: 400 });
     const go = async (job) => {
       switch (command) {
         case 'start': return this.start(job, s);

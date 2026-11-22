@@ -3,7 +3,7 @@ import { Search, RefreshCw, FolderSearch, FolderInput, Copy, CheckCircle2, Conta
 import { get, post, pickFolder, fmtBytes, fmtDate } from '@hostwerk/api';
 import { Btn, Seg, Field, Loading, Empty, Modal, toast, InfoTip } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
-import { GameArt, goServer } from './common';
+import { GameArt, Keep, goServer } from './common';
 import { RamHint } from './setup';
 
 /*
@@ -46,7 +46,7 @@ function FoundCard({ it, onTake }) {
     <div className="card gs-found">
       <GameArt appid={it.kind === 'steam' ? it.appid : null} game={it.kind === 'steam' ? it.game : null} short={it.short} name={it.name} shape="wide" className="gs-found-art" />
       <div className="card-body stack gs-tight">
-        <div className="row-tight gs-wrap"><b className="gs-found-name">{it.name}</b><span className="badge">{t(SOURCE[it.source] || it.source)}</span></div>
+        <div className="row-tight gs-wrap"><b className="gs-found-name"><Keep>{it.name}</Keep></b><span className="badge">{t(SOURCE[it.source] || it.source)}</span></div>
         <div className="tiny mono muted gs-break" title={it.dir || it.container}>{it.dir || t('Container {name} ({image})', { name: it.container, image: it.image })}</div>
         <Facts it={it} />
         <RamHint ram={it.ram} />

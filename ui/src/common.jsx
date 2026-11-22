@@ -1,11 +1,15 @@
 import { toast, Progress } from '@hostwerk/ui';
-import { SvcImage, LazyImg } from '@hostwerk/kit';
+import { SvcImage, LazyImg, Keep as HostKeep } from '@hostwerk/kit';
 import { apiUrl } from '@hostwerk/api';
 import { t } from '@hostwerk/i18n';
 
 /* Game servers – shared helpers of the interface (paths, labels, game logos). */
 
 export const BASE = '#/ext/game-servers';
+/** Reiter „Netzwerk“ der Seite: Hostwerk nennt Bereichsreiter x-<Erweiterung>-<Reiter> (games.tabs) – #/ext/game-network gibt es nicht mehr. */
+export const NETWORK = `${BASE}/x-game-servers-network`;
+/** Nutzerdaten (Servernamen, Spielernamen, Karte …) nie automatisch übersetzen – ältere Hostwerk ohne Keep: unverändert. */
+export const Keep = HostKeep || (({ children }) => children);
 export const isSteam = (s) => s.method === 'steam' || s.kind === 'steam';
 /** Initials on a colour from the name – the fallback for a missing picture (never an empty grey box). */
 export function Monogram({ name, className = '', style }) {
